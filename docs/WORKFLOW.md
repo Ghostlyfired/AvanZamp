@@ -24,6 +24,8 @@ AUTO_APPROVE now authorizes automatic posting only when all mandatory backend ch
 
 Manual approval retains reason/source-confirmation requirements and current-balance reevaluation. Unique job and vendor/invoice commitments plus transactional locking prevent repeated posting. Existing historical recommendations are never automatically posted by migration. No model call occurs while a financial transaction lock is held. Financial history remains append-only in production.
 
+A human reviewer may resolve a missing source citation for an extracted adjustment only with a non-empty exception reason and explicit source confirmation. The reviewer must check the printed invoice. Failed arithmetic, other extraction warnings, missing critical facts, duplicate identities, vendor/PO conflicts, and current procurement failures remain blocking. Automatic posting never uses this manual exception.
+
 Vendor identifiers are allocated under the same serialized/idempotent command mechanism as administration. A durable high-water mark considers existing V001 and V-001 styles and custom numeric identifiers. Dialog reservations may leave gaps; deleted IDs are not reused. Custom IDs still require uniqueness.
 
 ## Persistence and presentation

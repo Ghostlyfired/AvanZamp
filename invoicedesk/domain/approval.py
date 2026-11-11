@@ -43,7 +43,19 @@ def authorize(recommendation: Recommendation, policy: Policy, reason: str,
         raise ApprovalBlocked('The PO must belong to the invoice vendor.')
     # Confirmation can resolve source uncertainty, but never an arithmetic failure or partial parse.
     integrity = next(c for c in recommendation.checks if c.check_id == 'extraction_integrity')
-    if blocking_warnings(inv) or any(not f['passed'] for f in integrity.evidence['findings']):
+    warnings = blocking_warnings(inv)
+    # A reviewer who checked the printed source may resolve a missing citation
+    # for a charge row manually. Keep other extraction warnings and every failed
+    # arithmetic finding blocking, including automatic posting.
+    manual_adjustment_confirmation = (
+        confirmed_source
+        and bool(reason.strip())
+        and any(c.check_id == 'source_grounding' and c.proposed for c in recommendation.checks)
+        and any(warning.startswith('Grounding failed: adjustments') for warning in warnings)
+    )
+    if manual_adjustment_confirmation:
+        warnings = [warning for warning in warnings if not warning.startswith('Grounding failed: adjustments')]
+    if warnings or any(not f['passed'] for f in integrity.evidence['findings']):
         raise ApprovalBlocked('Resolve extraction issues in a new revision before approval.')
     if not any(f.get('scope') == 'total' and f['passed'] for f in integrity.evidence['findings']):
         raise ApprovalBlocked('Net/tax arithmetic is unresolved.')
