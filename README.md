@@ -1,6 +1,6 @@
 # InvoiceDesk
 
-For a resettable, password-protected hackathon link on one Render Free service, follow [the Render demo deployment guide](docs/HACKATHON_RENDER.md). The demo starts with sample vendors/POs and separate, empty invoice history.
+For a resettable, password-protected hackathon link on one Render Free service, follow [the Render demo deployment guide](docs/HACKATHON_RENDER.md). The demo starts with sample vendors/POs, including a clearly synthetic Apple test order, and separate invoice history.
 
 InvoiceDesk extracts invoice facts with a fresh LLM request, validates them against authorized purchase orders, and automatically posts invoices that pass all mandatory checks. Other invoices retain a review report with the verdict, justification, source evidence, and next action. The model extracts facts; deterministic backend rules own decisions and ledger writes. No payments are executed.
 

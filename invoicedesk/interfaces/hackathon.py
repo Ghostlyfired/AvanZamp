@@ -18,6 +18,39 @@ from .local_api import create_app as workspace_app
 from .local_workspace import Workspace
 
 NOTICE = 'Hackathon demo—data may reset. Shared judge workspace; use synthetic invoices only.'
+APPLE_VENDOR_ID = 'V-009'
+APPLE_PO = {
+    'po_number': 'PO-1241',
+    'vendor_id': APPLE_VENDOR_ID,
+    'description': 'Apple Macbook M4 Apple iPhone 12 Apple iPhone Air Apple Airpods 4',
+    'net_amount': '3196.00',
+    'tax_rate': '0.12',
+    'currency': 'USD',
+    'status': 'open',
+    'issue_date': '2026-11-01',
+    'line_items_json': '[{"description":"Apple Macbook M4","quantity":"1","unit_price":"1499.00","amount":"1499.00"},{"description":"Apple iPhone 12","quantity":"1","unit_price":"599.00","amount":"599.00"},{"description":"Apple iPhone Air","quantity":"1","unit_price":"899.00","amount":"899.00"},{"description":"Apple Airpods 4","quantity":"1","unit_price":"199.00","amount":"199.00"}]',
+    'charge_allowances_json': '[]',
+}
+
+
+def seed_hackathon_procurement(workspace):
+    """Ensure synthetic Apple demo records exist without overwriting judge edits."""
+    with workspace.db() as db, db.conn:
+        vendor = db.conn.execute('INSERT OR IGNORE INTO vendors VALUES (?,?,?,?,?)', (
+            APPLE_VENDOR_ID, 'Apple Technologies Ltd.',
+            '["Apple Technologies Inc","Apple Technologies"]', 'approved',
+            'Synthetic hackathon demonstration data; not production procurement authorization.',
+        ))
+        columns = list(APPLE_PO)
+        po = db.conn.execute(f"INSERT OR IGNORE INTO purchase_orders ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+                             tuple(APPLE_PO[column] for column in columns))
+        if vendor.rowcount:
+            db.conn.execute('INSERT OR IGNORE INTO ui_revisions VALUES (?,?,1)', ('vendors', APPLE_VENDOR_ID))
+        if po.rowcount:
+            db.conn.execute('INSERT OR IGNORE INTO ui_revisions VALUES (?,?,1)', ('purchase-orders', APPLE_PO['po_number']))
+        if vendor.rowcount or po.rowcount:
+            workspace.audit(db, 'workspace', 'hackathon-demo', 'synthetic_procurement_seeded',
+                            {'vendor_id': APPLE_VENDOR_ID, 'po_number': APPLE_PO['po_number']}, actor='system')
 
 
 @dataclass(frozen=True)
@@ -88,6 +121,7 @@ def create_app(*, root: Path | None = None, start_worker=True):
     # A directory cannot be imported as a source DB. Never copy local history,
     # even when INVOICEDESK_DB points at a real operator workspace.
     workspace = Workspace(root=root, source=root)
+    seed_hackathon_procurement(workspace)
     app = workspace_app(workspace, start_worker=start_worker,
                         allowed_hosts=[urlsplit(settings.origin).hostname],
                         allowed_origins={settings.origin}, demo_notice=NOTICE)
