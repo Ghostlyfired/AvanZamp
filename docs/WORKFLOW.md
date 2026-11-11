@@ -14,7 +14,9 @@ POs may include ordered `line_items` (description, optional part_number, quantit
 
 Absent PO references use content/amount/recency weights 0.7/0.2/0.1, minimum content similarity 0.8, minimum score 0.8 and winning margin 0.2. Explicit unknown references do not silently fall back to another PO.
 
-New stable checks: `po_scope_consistency`, `po_charge_consistency`, `po_tax_consistency`; each material discrepancy requires review. Rules are versioned as invoice-rules-5; policy defaults are invoice-policy-2.
+New stable checks: `po_scope_consistency`, `po_charge_consistency`, `po_tax_consistency`; each material discrepancy requires review. Rules are versioned as invoice-rules-6; policy defaults are invoice-policy-2.
+
+Rejected, unposted submissions remain in history but no longer reserve their invoice identity for exact/near duplicate checks. Pending submissions and all ledger commitments continue to block duplicate payment. Rejecting a mistaken upload permits a corrected replacement to be reviewed; rejected reports remain terminal and cannot be reopened. PostgreSQL snapshots take the actual review state from the job, with ledger commitments always treated as approved. SQLite review operations likewise prohibit rejecting an approved posting. No existing invoice is automatically approved by this change.
 
 ## Posting and concurrency
 

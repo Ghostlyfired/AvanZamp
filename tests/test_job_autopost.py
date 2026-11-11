@@ -163,3 +163,26 @@ def test_concurrent_jobs_serialize_final_balance_checks(backend,tmp_path):
     assert sorted(row['review_state'] for row in saved)==['approved','pending']
     with repo.engine.connect() as c:
         assert list(c.execute(sa.select(s.ledger.c.amount)).scalars())==[Decimal('1200')]
+
+
+def test_corrected_submission_after_rejection_keeps_single_posting(backend,tmp_path):
+    from invoicedesk.application.review import ReviewService
+    repo,service = backend
+    first,client,_ = submit(backend,tmp_path,'CORRECTED','600',delivery='20')
+    service.process(first,client)
+    assert report(backend,first)['decision']['outcome']=='NEEDS_REVIEW'
+    ReviewService(repo).act(first['id'],actor='reviewer',roles={'reviewer'},key='reject-incorrect',
+        revision=1,approve=False,reason='Incorrect charge; unpaid submission rejected.')
+    replacement,client,_ = submit(backend,tmp_path,'CORRECTED','600.00')
+    service.process(replacement,client)
+    assert report(backend,replacement)['review_state']=='approved'
+    with repo.engine.connect() as c:
+        snapshot=repo.snapshot(c)
+        states={row['run_id']:row['review_status'] for row in snapshot.runs()}
+        assert states[first['id']]=='rejected' and states[replacement['id']]=='approved'
+        assert len(list(c.execute(sa.select(s.ledger))))==1
+    duplicate,client,_ = submit(backend,tmp_path,'CORRECTED','600.000')
+    service.process(duplicate,client)
+    assert report(backend,duplicate)['decision']['outcome']=='REJECT'
+    with repo.engine.connect() as c:
+        assert len(list(c.execute(sa.select(s.ledger))))==1

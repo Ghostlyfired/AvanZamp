@@ -94,6 +94,9 @@ def duplicates(inv,norm,v,db,policy) -> list[CheckResult]:
     exact=[]; near=[]
     for row in db.runs():
         if row['vendor_id']!=v['vendor_id']:continue
+        # A terminal rejection carries no payment commitment and must not reserve
+        # the invoice identity forever. Pending and posted copies still count.
+        if row.get('review_status')=='rejected':continue
         decision=json.loads(row['decision_json'])
         if 'duplicate_exact' in decision['driving_checks']:continue
         old=json.loads(row['normalized_json'])

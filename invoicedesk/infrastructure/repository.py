@@ -58,12 +58,13 @@ class Repository:
                 latest[row['job_id']] = row
         # Include pending interpretations in duplicate detection; only approved ledger entries consume money.
         commitments = set(c.execute(sa.select(s.ledger.c.job_id)).scalars())
+        review_states = dict(c.execute(sa.select(s.jobs.c.id, s.jobs.c.review_state)).all())
         runs = []
         for job_id, row in latest.items():
             report = row['data']
             runs.append(dict(run_id=job_id, vendor_id=report['vendor_id'],
                              matched_po=report['po_number'], extraction_json=canonical(report['extraction']),
-                             review_status='approved' if job_id in commitments else 'pending',
+                             review_status='approved' if job_id in commitments else review_states.get(job_id, 'pending'),
                              decision_json=canonical(report['decision']),
                              normalized_json=canonical(report['normalized'])))
         balances: dict[str, Decimal] = {}

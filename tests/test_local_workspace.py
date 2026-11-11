@@ -366,3 +366,23 @@ def test_corrected_approved_identity_is_used_for_duplicate_protection(workspace,
     store_report(workspace,duplicate)
     with pytest.raises(ApprovalBlocked):approve(workspace,duplicate,'duplicate-approval')
     with workspace.db() as db:assert len(db.rows('SELECT * FROM pilot_ledger'))==1
+
+
+def test_rejected_unposted_copy_can_be_replaced_but_posted_copy_cannot(workspace):
+    first=upload(workspace,'first-upload')
+    store_report(workspace,first)
+    replacement=upload(workspace,'replacement-upload')
+    store_report(workspace,replacement)
+    # A still-pending original continues to block the duplicate submission.
+    with pytest.raises(ApprovalBlocked):approve(workspace,replacement,'pending-original')
+    workspace.review(first,False,1,'Discarded unpaid submission',False,'discard-original')
+    with pytest.raises(Conflict):workspace.review(first,True,2,'Reopen',True,'reopen-original')
+    assert approve(workspace,replacement,'approve-replacement')['review_status']=='approved'
+    third=upload(workspace,'third-upload')
+    store_report(workspace,third)
+    with pytest.raises(ApprovalBlocked):approve(workspace,third,'posted-original')
+    with workspace.db() as db:
+        assert len(db.rows('SELECT * FROM runs'))==3
+        assert len(db.rows('SELECT * FROM pilot_ledger'))==1
+        assert db.rows('SELECT run_id FROM pilot_ledger')[0]['run_id']=='run-'+replacement
+    assert workspace.detail(first)['status']=='Rejected'
