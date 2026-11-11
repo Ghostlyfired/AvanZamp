@@ -70,6 +70,11 @@ function valueView(value) {
 }
 function detailsView(value,title='Details') {return el('details',{},el('summary',{},title),valueView(value));}
 function jsonView(value, title = 'Raw JSON') { return el('details',{},el('summary',{},title),el('pre',{text:JSON.stringify(value,null,2)})); }
+function sourceVerification(metadata) {
+  return Number.isInteger(metadata?.grounded_count) && Number.isInteger(metadata?.unverified_count)
+    ? metadata.grounded_count+' verified · '+metadata.unverified_count+' unverified'
+    : 'Counts unavailable; recheck saved extraction.';
+}
 function fact(label, value) {
   const parsed=structuredValue(value);
   return el('div',{class:'fact'},el('span',{class:'fact-label'},label),typeof parsed==='object' && parsed!==null?valueView(parsed):el('strong',{text:parsed}));
@@ -406,7 +411,7 @@ async function renderInvoice(id,version,refresh=false) {
     summary.append(...(['Approved','Rejected'].includes(row.status)?[]:[badge(recommendation)]),el('p',{class:'decision'},report.summary || report.decision.summary),el('h3',{},'Justification'),
       reasons.length?el('ul',{class:'reason-list'},reasons.map(reason=>el('li',{},valueView(reason)))):el('p',{},'All applicable validation checks passed.'),
       el('p',{},el('strong',{},'Next action'),el('span',{class:'sub'},row.status==='Approved'?'Approved net amount posted. No further approval is required.':report.decision.recommended_action)),
-      el('div',{class:'fact-grid'},fact('Issuer',row.issuer),fact('Invoice number',row.invoice_number),fact('Gross invoice amount',available(row.gross_amount)+' '+available(report.normalized?.currency || row.currency)),fact('Matched PO',row.matched_po),fact('Document type',row.document_type),fact('Received',dateText(row.created_at)),...(report.source_validation?[fact('Source verification',report.source_validation.grounded_count+' verified · '+report.source_validation.unverified_count+' unverified')]:[]),...(row.status==='Approved'?[fact('Approved net amount',available(report.normalized.net_amount)+' '+available(report.normalized.currency))]:[])));
+      el('div',{class:'fact-grid'},fact('Issuer',row.issuer),fact('Invoice number',row.invoice_number),fact('Gross invoice amount',available(row.gross_amount)+' '+available(report.normalized?.currency || row.currency)),fact('Matched PO',row.matched_po),fact('Document type',row.document_type),fact('Received',dateText(row.created_at)),...(report.source_validation?[fact('Source verification',sourceVerification(report.source_validation))]:[]),...(row.status==='Approved'?[fact('Approved net amount',available(report.normalized.net_amount)+' '+available(report.normalized.currency))]:[])));
     if(row.review_available)summary.append(el('div',{class:'action-row'},button('Approve invoice',()=>reviewDialog(row,'approve'),'primary'),button('Reject invoice',()=>reviewDialog(row,'reject'),'danger'),button('Recheck saved extraction',async()=>{try{await mutate('/invoices/'+row.id+'/recheck',{revision:row.revision},crypto.randomUUID());notify('Saved extraction rechecked against the source and current procurement data.');await renderInvoice(row.id,routeVersion);}catch(error){notify(error.message);}})));
     else if(row.imported)summary.append(el('p',{class:'source-foot'},'Imported historical record. Review actions follow its original backend state; process a new attempt when review is unavailable.'));
     if(report.decision.comms && row.status!=='Approved')summary.append(el('section',{class:'communication'},el('h3',{},'Suggested communication'),el('span',{class:'sub'},'Audience: '+report.decision.comms.audience),el('h4',{},report.decision.comms.subject),el('p',{class:'communication-body'},report.decision.comms.body)));

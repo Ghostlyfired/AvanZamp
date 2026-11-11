@@ -249,6 +249,11 @@ def test_authenticated_worker_extraction_details_approval_and_fulfillment(config
         assert detail['status'] == 'Approved'
         assert detail['report']['extraction']['invoice_number'] == 'DEMO-CLEAN'
         assert detail['report']['checks'] and detail['report']['sections']
+        metadata = detail['report']['source_validation']
+        references = detail['report']['source_evidence']
+        assert metadata['grounded_count'] == sum(ref['verification'] in {'VERIFIED','GROUNDED'} for ref in references)
+        assert metadata['grounded_count'] > 0
+        assert metadata['unverified_count'] == sum(ref['verification']=='UNVERIFIED' for ref in references)
         po = client.get('/api/v1/purchase-orders/PO-1001', auth=AUTH).json()
         assert po['fully_approved'] and Decimal(po['remaining_amount']) == 0
         identity, detail = upload('DEMO-REVIEW', 'Apex Logistics LLC', 'PO-1003', '2080')

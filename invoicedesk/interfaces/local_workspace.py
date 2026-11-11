@@ -487,7 +487,9 @@ class Workspace:
         sections = section_report(invoice,findings=findings,source_evidence=references)
         report = report_from(recommendation,invoice,findings,sections)
         report['source_evidence'] = [ref.model_dump(mode='json') for ref in references]
-        report['source_validation'] = metadata
+        report['source_validation'] = dict(metadata,
+            grounded_count=sum(ref.verification in {'VERIFIED','GROUNDED'} for ref in references),
+            unverified_count=sum(ref.verification=='UNVERIFIED' for ref in references))
         return report
 
     def recheck(self, identity, revision, key):

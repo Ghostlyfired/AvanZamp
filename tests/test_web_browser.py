@@ -23,6 +23,8 @@ def test_operator_views_in_chromium(tmp_path):
     checks = r"""
     (async()=>{
       const assert=(condition,message)=>{if(!condition)throw new Error(message);};
+      assert(sourceVerification({verification:'processing'}).includes('Counts unavailable'),'Legacy reports cannot display undefined counts');
+      assert(sourceVerification({grounded_count:4,unverified_count:2})==='4 verified · 2 unverified','Source counts are displayed accurately');
       let response={vendor_id:'V-023'},ok=true,request;
       window.fetch=async(url,options)=>{request={url,options};return {ok,json:async()=>response};};
       config={csrf_token:'csrf-test'};
