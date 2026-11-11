@@ -39,6 +39,8 @@ The blueprint prompts for `OPENAI_API_KEY` by default. To deploy with Anthropic 
 
 The server refuses to start without an exact HTTPS origin, valid judge credentials, provider, model and the selected provider key. It makes no provider call at startup. Each accepted upload makes a fresh live extraction request, even when the document was processed previously. Actual provider calls use your provider's billing.
 
+The demo image and blueprint set `LOG_TO_FILE=false` and `LOG_TO_CONSOLE=true`; Render collects console logs. If an earlier deployment fails with `PermissionError: /app/logs`, add these two values under **Environment** and save/redeploy. The non-root container cannot write to `/app`. Optional file logs, if explicitly enabled, default to `/tmp/invoicedesk-hackathon/logs` in the corrected image.
+
 ## Hosted acceptance
 
 These checks must be performed against the actual HTTPS URL; offline tests do not establish hosted success. Record the deployed commit, URL, date and results privately, without credentials.
@@ -78,8 +80,8 @@ Do not pass secrets as build arguments. Runtime secrets belong in Render's envir
 
 ### Verification performed on 2026-11-11
 
-- Python 3.12 offline regression: **274 passed, 6 skipped**. The existing environment-dependent checks retain their skips.
-- All **33** hackathon tests passed, including an authenticated HTTP/worker flow with explicitly synthetic provider facts, expanded reports, automatic/manual approval and PO fulfillment.
+- Python 3.12 offline regression: **275 passed, 6 skipped**. The existing environment-dependent checks retain their skips.
+- All **34** hackathon tests passed, including an authenticated HTTP/worker flow with explicitly synthetic provider facts, expanded reports, automatic/manual approval and PO fulfillment. A fresh-process startup regression also denies writes to the application log directory, reproducing the initial Render failure before the logging-default fix and passing afterwards.
 - A separate temporary copy containing only the application files copied by the demo Dockerfile booted successfully with the worker, public health check, protected UI/assets, sample masters and empty history. No local database or provider recording was copied.
 - `git diff --check` passed. Existing local workspace and production files were preserved.
 - Docker is unavailable in the implementation environment, so the actual container build was not run. Render is not connected to this session; no service was published and hosted acceptance remains pending. No public URL is claimed by these results.

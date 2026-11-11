@@ -1,8 +1,11 @@
 """Offline Render deployment boundary tests; never use actual provider credentials."""
 import base64
 import hashlib
+import os
 from pathlib import Path
+import shlex
 import shutil
+import subprocess
 import time
 
 from fastapi.testclient import TestClient
@@ -15,6 +18,43 @@ from invoicedesk.policy import ROOT
 
 ORIGIN = 'https://judges.onrender.com'
 AUTH = ('judge', 'synthetic-password-for-tests')
+
+
+def test_container_startup_without_writable_application_logs(tmp_path):
+    """Exercise import-time logging in a fresh process using the image ENV defaults."""
+    env = os.environ.copy()
+    for line in (ROOT/'Dockerfile.hackathon').read_text().splitlines():
+        if line.startswith('ENV '):
+            env.update(token.split('=', 1) for token in shlex.split(line[4:]))
+    forbidden = tmp_path/'read-only-app'/'logs'
+    env.update(DEMO_PUBLIC_ORIGIN=ORIGIN, DEMO_USERNAME=AUTH[0], DEMO_PASSWORD=AUTH[1],
+               LLM_PROVIDER='openai', LLM_MODEL='synthetic-offline', OPENAI_API_KEY='synthetic-offline-key',
+               INVOICEDESK_ENV_FILE=str(tmp_path/'absent.env'), LOGGING_DIR=str(forbidden),
+               DEMO_TEST_ROOT=str(tmp_path/'runtime'))
+    script = '''
+import os
+from pathlib import Path
+import socket
+socket.getaddrinfo = lambda *a, **k: (_ for _ in ()).throw(AssertionError('Network forbidden'))
+forbidden = Path(os.environ['LOGGING_DIR']).resolve()
+original_mkdir = Path.mkdir
+def guarded_mkdir(path, *args, **kwargs):
+    if path.resolve() == forbidden:
+        raise PermissionError('Application log directory is read-only')
+    return original_mkdir(path, *args, **kwargs)
+Path.mkdir = guarded_mkdir
+from invoicedesk.interfaces.hackathon import create_app
+from fastapi.testclient import TestClient
+app = create_app(root=Path(os.environ['DEMO_TEST_ROOT']))
+with TestClient(app, base_url=os.environ['DEMO_PUBLIC_ORIGIN']) as client:
+    assert client.get('/healthz').json() == {'status': 'ok'}
+    assert client.get('/invoices').status_code == 401
+    assert client.get('/api/v1/invoices', auth=(os.environ['DEMO_USERNAME'], os.environ['DEMO_PASSWORD'])).json()['total'] == 0
+assert not forbidden.exists()
+'''
+    result = subprocess.run([os.sys.executable, '-c', script], env=env, cwd=ROOT,
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.fixture

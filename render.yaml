@@ -8,6 +8,10 @@ services:
     dockerContext: .
     healthCheckPath: /healthz
     envVars:
+      - key: LOG_TO_FILE
+        value: "false"
+      - key: LOG_TO_CONSOLE
+        value: "true"
       - key: DEMO_PUBLIC_ORIGIN
         sync: false
       - key: DEMO_USERNAME
