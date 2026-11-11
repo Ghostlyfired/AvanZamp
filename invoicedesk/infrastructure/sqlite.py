@@ -37,6 +37,11 @@ class Db:
         self.conn = sqlite3.connect(path, timeout=30)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        columns = {row[1] for row in self.conn.execute('PRAGMA table_info(purchase_orders)')}
+        for name in ('line_items_json', 'charge_allowances_json'):
+            if name not in columns:
+                self.conn.execute(f"ALTER TABLE purchase_orders ADD COLUMN {name} TEXT NOT NULL DEFAULT '[]'")
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()

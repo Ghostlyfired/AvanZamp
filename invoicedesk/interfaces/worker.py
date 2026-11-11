@@ -52,12 +52,12 @@ def main():
     configure_logging()
     require_production_dependencies()
     from invoicedesk.infrastructure.preflight import require_evaluated_model
-    require_evaluated_model()
+    require_evaluated_model(mode='live')
     repo = Repository(os.environ['DATABASE_URL'])
     storage = LocalStorage(Path(os.environ['DOCUMENT_ROOT']))
     while True:
         Path('/tmp/invoicedesk-worker-heartbeat').touch()
-        if not run_once(repo, storage):
+        if not run_once(repo, storage, lambda: LlmClient('live')):
             time.sleep(1)
 
 

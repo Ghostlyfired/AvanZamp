@@ -138,49 +138,26 @@ class LlmClient:
             provider=self.provider_name, model=self.model, prompt=EXTRACTION_PROMPT, schema=schema,
             settings=provider_settings(self.provider_name)))
         cache = self.cache_dir/((document.sha256 if self.mode == 'cache' else self.fingerprint)+'.json')
-        if self.mode == 'live' and not cache.exists() and not self.refresh:
-            for candidate in sorted(self.cache_dir.glob('*.json')):
-                try:
-                    envelope = json.loads(candidate.read_text())
-                    requested = envelope.get('requested_model', envelope.get('model'))
-                    compatible_fingerprint = fingerprint(dict(document=document.sha256, preprocessing=PREPROCESSING_VERSION,
-                        provider=self.provider_name, model=requested, prompt=EXTRACTION_PROMPT, schema=schema,
-                        settings=provider_settings(self.provider_name)))
-                    if (recording_matches_model(envelope, self.model) and envelope.get('provider') == self.provider_name
-                            and envelope.get('fingerprint') == compatible_fingerprint
-                            and envelope.get('provenance') in {'api_recording', 'api_recording_partial'}):
-                        cache = candidate
-                        break
-                except (OSError, ValueError, AttributeError, TypeError):
-                    continue
-        if cache.exists() and not self.refresh:
+        # Live uploads are fresh extraction attempts. Recordings are retained for
+        # audit, but only explicit offline replay may read them.
+        if self.mode == 'cache' and cache.exists() and not self.refresh:
             try:
                 stored = json.loads(cache.read_text())
                 if not isinstance(stored, dict):
                     raise ValueError('Cache envelope must be a JSON object.')
-                # Live cache is bound to the selected model and extractor prompt version.
-                compatible = (self.mode == 'cache' or (
-                    stored.get('provenance') in {'api_recording', 'api_recording_partial'}
-                    and recording_matches_model(stored, self.model)
-                    and stored.get('provider') == self.provider_name
-                    and stored.get('fingerprint') == fingerprint(dict(document=document.sha256, preprocessing=PREPROCESSING_VERSION,
-                        provider=self.provider_name, model=stored.get('requested_model', stored.get('model')), prompt=EXTRACTION_PROMPT, schema=schema,
-                        settings=provider_settings(self.provider_name)))
-                ))
-                if compatible:
-                    result = self._accept_response(stored['extraction'])
-                    for issue in stored.get('validation_issues', []):
-                        if isinstance(issue, dict) and issue.get('type') == 'model_snapshot_mismatch':
-                            continue  # Historical transport metadata is not a document-field error.
-                        if isinstance(issue, dict) and {'field','type','message'} <= issue.keys() and issue not in self.validation_issues:
-                            self.validation_issues.append(issue)
-                            result['warnings'].append('Partial extraction: '+str(issue['field'])+' ('+str(issue['type'])+')')
-                    self.fingerprint = stored.get('fingerprint', self.fingerprint)
-                    self.resolved_model = stored.get('model', self.model)
-                    self.cache_hit = True
-                    self.provenance = stored.get('provenance', 'unknown')
-                    logger.debug('Extraction cache hit; provenance=%s', self.provenance)
-                    return result
+                result = self._accept_response(stored['extraction'])
+                for issue in stored.get('validation_issues', []):
+                    if isinstance(issue, dict) and issue.get('type') == 'model_snapshot_mismatch':
+                        continue  # Historical transport metadata is not a document-field error.
+                    if isinstance(issue, dict) and {'field','type','message'} <= issue.keys() and issue not in self.validation_issues:
+                        self.validation_issues.append(issue)
+                        result['warnings'].append('Partial extraction: '+str(issue['field'])+' ('+str(issue['type'])+')')
+                self.fingerprint = stored.get('fingerprint', self.fingerprint)
+                self.resolved_model = stored.get('model', self.model)
+                self.cache_hit = True
+                self.provenance = stored.get('provenance', 'unknown')
+                logger.debug('Extraction cache hit; provenance=%s', self.provenance)
+                return result
             except (OSError, ValueError, KeyError, TypeError, LlmUnavailable):
                 logger.warning('Ignoring invalid extraction cache entry.')
         if self.mode == 'cache':

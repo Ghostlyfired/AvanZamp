@@ -62,7 +62,7 @@ def test_bad_evidence_retains_facts_and_caches_partial_response(tmp_path,caplog)
     assert stored['usage']['input_tokens']==100
     assert 'total_tokens=150' in caplog.text
     result=client.extract_invoice(ROOT/'data/examples/office_furniture.png')
-    assert client.cache_hit and client.calls==0
+    assert not client.cache_hit and client.calls==1
     assert result['total']=='10000.00'
     assert client.validation_issues[0]['field']=='evidence.tax_amount'
 

@@ -4,8 +4,13 @@ const dialog = document.querySelector('#dialog');
 let config = {}, current = null, routeVersion = 0, pollBusy = false;
 let activeTab = 'sections', timer;
 const labels = {'invoices':'Invoices','purchase-orders':'Purchase orders','vendors':'Vendors','activity':'Activity','developer':'Developer'};
-const available = value => value === null || value === undefined || value === '' ? 'Unavailable' : String(value);
-const dateText = value => value ? new Date(value).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}) : 'Unavailable';
+const can = (...roles) => !config.roles || config.roles.some(role=>roles.includes(role));
+const available = value => value === null || value === undefined || value === '' ? 'Unavailable' : typeof value==='object' ? 'See details' : String(value);
+const dateText = value => {
+  if(!value)return 'Unavailable';
+  const date=new Date(value);
+  return Number.isNaN(date.getTime())?'Unavailable':date.toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'});
+};
 // All document, model, and operator text goes through textContent / text nodes.
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -19,13 +24,15 @@ function el(tag, attrs = {}, ...children) {
   }
   for (const child of children.flat(Infinity)) {
     if (child === null || child === undefined) continue;
-    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    node.append(child instanceof Node ? child : typeof child==='object' ? valueView(child) : document.createTextNode(String(child)));
   }
   return node;
 }
 function button(text, onClick, cls = '') { return el('button',{type:'button',class:cls,onClick},text); }
 function stateLabel(value) {
   const text=available(value);
+  const outcomes={AUTO_APPROVE:'Approved by checks',NEEDS_REVIEW:'Needs review',HOLD_MISSING_INFO:'Missing information',REJECT:'Rejected by checks'};
+  if(outcomes[text])return outcomes[text];
   return ['approved','blocked','open','closed','pending','queued','running','completed','errored'].includes(text.toLowerCase()) ? text[0].toUpperCase()+text.slice(1).toLowerCase() : text;
 }
 function badge(text) {
@@ -39,7 +46,12 @@ function badge(text) {
 function humanLabel(value) {
   return String(value).replace(/_json$/, '').split(/[_.]/).map(word=>({po:'PO',id:'ID',usd:'USD',sha256:'SHA-256',ms:'ms'}[word] || word.charAt(0).toUpperCase()+word.slice(1))).join(' ');
 }
+function structuredValue(value) {
+  if(typeof value!=='string' || !/^[\[{]/.test(value.trim()))return value;
+  try {const parsed=JSON.parse(value);return parsed && typeof parsed==='object'?parsed:value;}catch{return value;}
+}
 function valueView(value) {
+  value=structuredValue(value);
   if(value===null || value===undefined)return el('span',{class:'muted'},'Unavailable');
   if(typeof value==='boolean')return el('span',{},value?'Yes':'No');
   if(Array.isArray(value)) {
@@ -58,18 +70,25 @@ function valueView(value) {
 }
 function detailsView(value,title='Details') {return el('details',{},el('summary',{},title),valueView(value));}
 function jsonView(value, title = 'Raw JSON') { return el('details',{},el('summary',{},title),el('pre',{text:JSON.stringify(value,null,2)})); }
-function fact(label, value) { return el('div',{class:'fact'},el('span',{},label),el('strong',{text:value})); }
+function fact(label, value) {
+  const parsed=structuredValue(value);
+  return el('div',{class:'fact'},el('span',{class:'fact-label'},label),typeof parsed==='object' && parsed!==null?valueView(parsed):el('strong',{text:parsed}));
+}
 function notify(message) {
   const node = document.querySelector('#notice'); node.textContent = message;
   clearTimeout(timer); timer = setTimeout(()=>node.textContent='',6000);
 }
 async function api(path, options = {}) {
-  const response = await fetch('/api/v1'+path,options);
+  const headers=new Headers(options.headers);
+  if(config.csrf_token && options.method && !['GET','HEAD','OPTIONS'].includes(options.method.toUpperCase()))headers.set('X-CSRF-Token',config.csrf_token);
+  const response = await fetch('/api/v1'+path,{...options,headers,credentials:'same-origin'});
   let body;
-  try { body = await response.json(); } catch { throw new Error('The local server returned an unreadable response.'); }
+  try { body = await response.json(); } catch { throw new Error('The server returned an unreadable response.'); }
   if (!response.ok) {
     const error = body.error;
-    throw new Error(error ? error.message+(error.fields?.length ? '\n'+error.fields.map(f=>f.field+': '+f.message).join('\n') : '') : available(body.detail));
+    const details=error?.fields || (Array.isArray(body.detail)?body.detail:[]);
+    const message=error?.message || (typeof body.detail==='string'?body.detail:'Unable to complete the request.');
+    throw new Error(message+(details.length?'\n'+details.map(field=>humanLabel(field.field || (field.loc || []).join('.'))+': '+(field.message || field.msg || 'Invalid value')).join('\n'):''));
   }
   return body;
 }
@@ -82,9 +101,9 @@ function navigate(path, replace = false) {
 }
 document.addEventListener('click',event=>{
   const anchor = event.target.closest('a');
-  if (!anchor || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
+  if (!anchor || anchor.target==='_blank' || anchor.hasAttribute('download') || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
   const url = new URL(anchor.href,location.href);
-  if (url.origin !== location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/assets/')) return;
+  if (url.origin !== location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/assets/') || url.pathname.startsWith('/auth/')) return;
   event.preventDefault(); navigate(url.pathname+url.search);
 });
 window.addEventListener('popstate',renderRoute);
@@ -128,10 +147,26 @@ function inputField(title,name,value='',extra={}) {
   return el('label',{},title,el('input',{name,value,...extra}));
 }
 function textareaField(title,name,value='',required=false) { return el('label',{},title,el('textarea',{name,required},value)); }
+function poLinesEditor(lines=[], allowances=[]) {
+  const items=el('div',{class:'po-editor-rows'}),charges=el('div',{class:'po-editor-rows'});
+  const addRow=(container,row,fields)=>{
+    const inputs=fields.map(([key,title])=>inputField(title,key,row[key] ?? '',{inputmode:key==='description' || key==='part_number'?'text':'decimal'}));
+    const element=el('div',{class:'po-editor-row'},inputs,button('Remove',()=>element.remove()));
+    container.append(element);
+  };
+  const itemFields=[['description','Description'],['part_number','Part number'],['quantity','Quantity'],['unit_price','Unit price'],['amount','Net amount']];
+  const chargeFields=[['description','Charge description'],['amount','Allowed amount per invoice']];
+  for(const line of lines)addRow(items,line,itemFields);
+  for(const charge of allowances)addRow(charges,charge,chargeFields);
+  const read=container=>[...container.children].map(row=>Object.fromEntries([...row.querySelectorAll('input')].map(input=>[input.name,input.value.trim() || null])));
+  return {node:el('section',{class:'po-lines-editor'},el('h3',{},'Ordered items (optional)'),el('p',{class:'inline-help'},'Item details enable quantity, rate and description checks.'),items,button('+ Add ordered item',()=>addRow(items,{},itemFields)),
+    el('h3',{},'Approved additional charges (optional)'),charges,button('+ Add charge allowance',()=>addRow(charges,{},chargeFields))),
+    read:()=>({line_items:read(items),charge_allowances:read(charges)})};
+}
 async function uploadDialog() {
   const input = el('input',{name:'document',type:'file',accept:'.pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp',required:true});
   makeDialog('Upload an invoice','Add a document to the processing queue. You can keep working while extraction runs.',[
-    el('div',{class:'callout'},el('strong',{},'Live extraction'),el('div',{},available(config.provider)+' · '+available(config.model)),el('small',{},'Uses the configured LLM when extraction is required. Existing compatible API recordings may be reused.')),
+    el('div',{class:'callout'},el('strong',{},'Live extraction'),el('div',{},available(config.provider)+' · '+available(config.model)),el('small',{},'Every uploaded invoice is sent to the configured model for structured extraction.')),
     el('label',{class:'upload-zone'},'Choose a document',input,el('span',{class:'inline-help'},'PDF, PNG, JPEG or WebP · up to 20 MB'))
   ],'Upload and process',async (form,key)=>{
     const file = form.get('document');
@@ -142,8 +177,14 @@ async function uploadDialog() {
   });
 }
 async function vendorDialog(record = null) {
+  let vendorId=record?.vendor_id;
+  if(!record) {
+    try {vendorId=(await mutate('/vendors/reserve-id',{},crypto.randomUUID())).vendor_id;}
+    catch(error) {notify('Unable to prepare a vendor ID. '+error.message);return;}
+  }
   makeDialog(record?'Edit vendor':'New vendor','Approved vendor details are used again whenever an invoice is approved.',[
-    inputField('Vendor ID','vendor_id',record?.vendor_id,{required:true,pattern:'[A-Za-z0-9_\\-]+',maxLength:100,readOnly:!!record}),
+    inputField('Vendor ID','vendor_id',vendorId,{required:true,pattern:'[A-Za-z0-9_\\-]+',maxLength:100,readOnly:!!record}),
+    !record?el('p',{class:'inline-help'},'A unique ID has been generated. You can enter a custom ID before saving.'):null,
     inputField('Vendor name','name',record?.name,{required:true,maxLength:300}),
     textareaField('Aliases (one per line)','aliases',record?.aliases?.join('\n') || ''),
     textareaField('Notes','notes',record?.notes || '')
@@ -156,6 +197,7 @@ async function vendorDialog(record = null) {
 async function poDialog(record = null) {
   try {
     const vendors = await allRecords('vendors');
+    const linesEditor=poLinesEditor(record?.line_items || [],record?.charge_allowances || []);
     const vendorSelect = el('select',{name:'vendor_id',required:true},el('option',{value:''},'Select a vendor'),vendors.map(v=>el('option',{value:v.vendor_id},v.name+' ('+v.vendor_id+')')));
     vendorSelect.value=record?.vendor_id || '';
     const state = el('select',{name:'status'},['open','closed'].map(s=>el('option',{value:s},stateLabel(s))));
@@ -165,9 +207,11 @@ async function poDialog(record = null) {
       el('label',{},'Vendor',vendorSelect),textareaField('Description','description',record?.description || '',true),
       el('div',{class:'grid2'},inputField('Net amount','net_amount',record?.net_amount,{required:true,inputmode:'decimal',pattern:'[0-9]+([.][0-9]{1,6})?'}),inputField('Currency','currency',record?.currency || 'USD',{required:true,pattern:'[A-Za-z]{3}',maxLength:3})),
       el('div',{class:'grid2'},inputField('Tax rate (decimal, e.g. 0.08)','tax_rate',record?.tax_rate || '0',{required:true,inputmode:'decimal'}),inputField('Issue date','issue_date',record?.issue_date || new Date().toISOString().slice(0,10),{required:true,type:'date'})),
-      el('label',{},'Procurement state',state)
+      el('label',{},'Procurement state',state),linesEditor.node
     ],record?'Save changes':'Create purchase order',async (form,key)=>{
-      const payload=Object.fromEntries(form); if(record) payload.revision=record.revision;
+      const payload={};
+      for(const name of ['po_number','vendor_id','description','net_amount','currency','tax_rate','issue_date','status'])payload[name]=form.get(name);
+      Object.assign(payload,linesEditor.read()); if(record) payload.revision=record.revision;
       const result=await mutate('/purchase-orders'+(record?'/'+encodeURIComponent(record.po_number):''),payload,key,record?'PUT':'POST');
       notify('Purchase order saved.'); navigate('/purchase-orders/'+encodeURIComponent(result.po_number));
     });
@@ -202,7 +246,7 @@ function reviewDialog(record,action) {
   },!approve);
 }
 function retryDialog(record) {
-  makeDialog('Process a new attempt','The previous attempt and artifacts are preserved. This starts live extraction again and may make a new provider request.',[], 'Process again',async(form,key)=>{
+  makeDialog('Process a new attempt','The previous attempt and artifacts are preserved. This sends the document to the configured model again.',[], 'Process again',async(form,key)=>{
     const result=await mutate('/invoices/'+record.id+'/retry',{revision:record.revision},key);
     navigate('/invoices/'+result.id);
   });
@@ -216,12 +260,20 @@ function invoiceRows(items, developer=false) {
     el('div',{class:'money'},available(row.gross_amount)+' '+available(row.currency)),badge(row.status),detailLink('invoices',row.id)
   ]));
 }
+function fulfillmentView(row) {
+  const status=row.fulfillment_status || (row.fully_approved?'Fulfilled':'Unfulfilled');
+  const percent=row.fulfillment_percent;
+  return el('div',{},badge(status),percent!==null && percent!==undefined?el('span',{class:'sub'},available(percent)+'% fulfilled'):null,
+    el('span',{class:'sub'},'Approved: '+row.approved_amount+' '+row.currency),el('span',{class:'sub'},'Remaining: '+row.remaining_amount+' '+row.currency),
+    row.accepted_invoice_count!==undefined?el('span',{class:'sub'},row.accepted_invoice_count+' approved invoices'):null,
+    row.pending_amount!==undefined?el('span',{class:'sub'},'Pending review: '+row.pending_amount+' '+row.currency):null);
+}
 async function renderList(section,version) {
   const params=new URLSearchParams(location.search);
   const state={section,page:Number(params.get('page') || 1),q:params.get('q') || '',status:params.get('status') || '',vendor_id:params.get('vendor_id') || '',entity:params.get('entity') || '',action:params.get('action') || '',start:params.get('start') || '',end:params.get('end') || '',version};
   current=state;
   const subtitles={invoices:'Every document, from arrival to authorized approval.','purchase-orders':'Track procurement, invoice receipts and approved net balances.',vendors:'Maintain the vendor details used by your approval checks.',activity:'A chronological record of system and operator actions.',developer:'Stored run diagnostics, extraction provenance and stage events.'};
-  const add = section==='invoices'?button('+ Upload invoice',uploadDialog,'primary'):section==='vendors'?button('+ New vendor',()=>vendorDialog(),'primary'):section==='purchase-orders'?button('+ New PO',()=>poDialog(),'primary'):null;
+  const add = section==='invoices' && can('admin','uploader')?button('+ Upload invoice',uploadDialog,'primary'):section==='vendors' && can('admin')?button('+ New vendor',()=>vendorDialog(),'primary'):section==='purchase-orders' && can('admin')?button('+ New PO',()=>poDialog(),'primary'):null;
   const head=pageHead(labels[section],subtitles[section],add);
   const updateFilters=()=>{
     const next=new URLSearchParams();
@@ -267,8 +319,8 @@ async function refreshList(state) {
     headers=['Vendor','ID','Aliases','State','Activity',''];
     rows=result.items.map(row=>tableRow([row.name,row.vendor_id,row.aliases.join(', ') || '—',badge(row.status),row.invoice_count+' invoices · '+row.po_count+' POs',detailLink('vendors',row.vendor_id)]));
   } else if(state.section==='purchase-orders') {
-    headers=['Purchase order','Issued','Vendor','Net amount','State','Receipt activity','Approved net',''];
-    rows=result.items.map(row=>tableRow([el('div',{},row.po_number,el('span',{class:'sub'},row.description)),row.issue_date,row.vendor_name,row.net_amount+' '+row.currency,badge(row.status),row.receipt_count+' attempts',el('div',{},row.approved_amount+' '+row.currency,el('span',{class:'sub'},row.fully_approved?'Fully approved':'Remaining: '+row.remaining_amount+' '+row.currency)),detailLink('purchase-orders',row.po_number)]));
+    headers=['Purchase order','Issued','Vendor','Net amount','State','Receipt activity','Fulfillment',''];
+    rows=result.items.map(row=>tableRow([el('div',{},row.po_number,el('span',{class:'sub'},row.description)),row.issue_date,row.vendor_name,row.net_amount+' '+row.currency,badge(row.status),row.receipt_count+' attempts',fulfillmentView(row),detailLink('purchase-orders',row.po_number)]));
   } else {
     headers=['Time','Actor','Entity','Action','Details'];
     rows=result.items.map(row=>tableRow([dateText(row.created_at),row.actor,el('a',{href:'/'+row.entity+'/'+encodeURIComponent(row.entity_id)},row.entity_id),badge(row.action),detailsView(row.details,'View recorded details')]));
@@ -289,14 +341,16 @@ async function renderRecord(section,id,version) {
   const isVendor=section==='vendors';
   const content=el('div',{},el('a',{class:'back',href:'/'+section},'← Back to '+labels[section].toLowerCase()),
     pageHead(isVendor?row.name:row.po_number,isVendor?'Vendor master · '+row.vendor_id:row.description,
-      button('Edit '+(isVendor?'vendor':'PO'),()=>isVendor?vendorDialog(row):poDialog(row))),
+      can('admin')?button('Edit '+(isVendor?'vendor':'PO'),()=>isVendor?vendorDialog(row):poDialog(row)):null),
     el('div',{class:'card'},el('div',{class:'section-head'},el('h2',{},isVendor?'Vendor particulars':'Purchase order particulars'),badge(row.status)),
       el('div',{class:'fact-grid'},...(isVendor?[fact('Vendor ID',row.vendor_id),fact('Aliases',row.aliases.join(', ') || 'None'),fact('Notes',row.notes || 'None'),fact('Linked activity',row.invoice_count+' invoices · '+row.po_count+' POs')]:[
-        fact('Vendor',row.vendor_name),fact('Issued',row.issue_date),fact('Net PO amount',row.net_amount+' '+row.currency),fact('Tax rate',row.tax_rate),fact('Approved net postings',row.approved_amount+' '+row.currency),fact('Remaining net',row.remaining_amount+' '+row.currency),fact('Invoice receipt activity',row.receipt_count+' matched attempts'),fact('Approval coverage',row.fully_approved?'Fully approved':'Not fully approved'),fact('Net overage',row.overage_amount+' '+row.currency)
-      ])),isVendor?el('div',{class:'action-row'},button(row.status==='blocked'?'Unblock vendor':'Block vendor',()=>blockDialog(row),row.status==='blocked'?'':'danger')):el('p',{class:'source-foot'},'Open/closed is procurement state. Receipts consume no balance; human-approved net ledger postings determine coverage.')),
+        fact('Vendor',row.vendor_name),fact('Issued',row.issue_date),fact('Net PO amount',row.net_amount+' '+row.currency),fact('Tax rate',row.tax_rate),fact('Approved net postings',row.approved_amount+' '+row.currency),fact('Remaining net',row.remaining_amount+' '+row.currency),fact('Invoice receipt activity',row.receipt_count+' matched attempts'),el('div',{},el('span',{class:'muted'},'Fulfillment'),fulfillmentView(row)),fact('Net overage',row.overage_amount+' '+row.currency)
+      ])),isVendor?(can('admin')?el('div',{class:'action-row'},button(row.status==='blocked'?'Unblock vendor':'Block vendor',()=>blockDialog(row),row.status==='blocked'?'':'danger')):null):el('p',{class:'source-foot'},'Approved invoices determine fulfillment. Pending, rejected and superseded attempts consume no PO balance.')),
+    !isVendor && row.line_items?.length?el('section',{class:'card'},el('h2',{},'Ordered items'),valueView(row.line_items)):null,
+    !isVendor && row.charge_allowances?.length?el('section',{class:'card'},el('h2',{},'Approved additional charges'),el('p',{class:'inline-help'},'Maximum approved amount per invoice.'),valueView(row.charge_allowances)):null,
     el('h2',{},'Linked invoice attempts'),row.invoices.length?makeTable(['Invoice / file','Matched PO','Issuer','Received','Gross amount','Status',''],invoiceRows(row.invoices)):el('div',{class:'card'},empty('No matched invoice attempts.')),
     el('h2',{class:'all-activity'},'Action history'),activityTable(row.activity),
-    el('details',{class:'card danger-zone'},el('summary',{},'Danger section'),el('p',{class:'muted'},'Only unused records can be deleted. Referenced vendors can be blocked; referenced POs can be closed using Edit PO.'),button('Delete unused '+(isVendor?'vendor':'PO'),()=>deleteDialog(section,row),'danger')));
+    can('admin')?el('details',{class:'card danger-zone'},el('summary',{},'Danger section'),el('p',{class:'muted'},'Only unused records can be deleted. Referenced vendors can be blocked; referenced POs can be closed using Edit PO.'),button('Delete unused '+(isVendor?'vendor':'PO'),()=>deleteDialog(section,row),'danger')):null);
   main.replaceChildren(content);
 }
 function timeline(events) {
@@ -310,7 +364,7 @@ function sectionPanel(report) {
   const sections=report.sections || [];
   if(!sections.length)return el('div',{class:'card'},el('p',{class:'muted'},'Section validation was not retained for this historical run.'),detailsView(report.extraction,'Extracted fields'));
   return el('div',{},sections.map(section=>{
-    const card=el('section',{class:'card'},el('div',{class:'section-head'},el('h2',{},section.section.replaceAll('_',' ')),badge(section.status)),
+    const card=el('section',{class:'card'},el('div',{class:'section-head'},el('h2',{},humanLabel(section.section)),badge(section.status)),
       el('p',{class:'muted'},'Arithmetic ',badge(section.arithmetic_status),'  Source ',badge(section.verification_status)));
     if(section.verification_note)card.append(el('p',{class:'inline-help'},section.verification_note));
     if(section.section==='line_items') {
@@ -324,8 +378,7 @@ function sectionPanel(report) {
       const grid=el('div',{class:'fact-grid'});
       for(const [name,field] of Object.entries(section.fields || {})) {
         if(name==='line_items' || name==='evidence')continue;
-        if(typeof field.value==='object' && field.value!==null)grid.append(el('div',{},el('span',{class:'muted'},humanLabel(name)),valueView(field.value),badge(field.status)));
-        else grid.append(el('div',{class:'fact'},fact(name.replaceAll('_',' '),field.value),el('span',{class:'sub'},badge(field.status))));
+        grid.append(el('div',{},fact(humanLabel(name),field.value),el('span',{class:'sub'},badge(field.status))));
       }
       card.append(grid);
     }
@@ -336,7 +389,7 @@ function sectionPanel(report) {
 }
 async function renderInvoice(id,version,refresh=false) {
   const row=await api('/invoices/'+encodeURIComponent(id)); if(version!==routeVersion)return;
-  const signature=JSON.stringify([row.state,row.revision,row.events.length,row.report?.decision,row.error]);
+  const signature=JSON.stringify(row);
   if(refresh && current?.signature===signature)return;
   current={section:'invoices',id,version,signature};
   const report=row.report;
@@ -349,14 +402,16 @@ async function renderInvoice(id,version,refresh=false) {
   if(row.error)summary.append(el('div',{class:'callout error'},row.error.message));
   if(report) {
     const recommendation=report.decision.outcome==='AUTO_APPROVE'?'Approval recommended':report.decision.outcome==='HOLD_MISSING_INFO'?'Missing information':report.decision.outcome==='REJECT'?'Rejection recommended':'Review recommended';
-    summary.append(...(['Approved','Rejected'].includes(row.status)?[]:[badge(recommendation)]),el('p',{class:'decision'},report.summary || report.decision.summary),el('p',{},el('strong',{},row.status==='Approved'?'Approval':'Recommended action'),el('span',{class:'sub'},row.status==='Approved'?'Approved net amount posted. No further approval is required.':report.decision.recommended_action)),
-      el('ul',{class:'reason-list'},(report.summary_reasons || report.decision.reasons).map(reason=>el('li',{},reason))),
+    const reasons=report.summary_reasons?.length?report.summary_reasons:(report.decision.reasons || []);
+    summary.append(...(['Approved','Rejected'].includes(row.status)?[]:[badge(recommendation)]),el('p',{class:'decision'},report.summary || report.decision.summary),el('h3',{},'Justification'),
+      reasons.length?el('ul',{class:'reason-list'},reasons.map(reason=>el('li',{},valueView(reason)))):el('p',{},'All applicable validation checks passed.'),
+      el('p',{},el('strong',{},'Next action'),el('span',{class:'sub'},row.status==='Approved'?'Approved net amount posted. No further approval is required.':report.decision.recommended_action)),
       el('div',{class:'fact-grid'},fact('Issuer',row.issuer),fact('Invoice number',row.invoice_number),fact('Gross invoice amount',available(row.gross_amount)+' '+available(report.normalized?.currency || row.currency)),fact('Matched PO',row.matched_po),fact('Document type',row.document_type),fact('Received',dateText(row.created_at)),...(report.source_validation?[fact('Source verification',report.source_validation.grounded_count+' verified · '+report.source_validation.unverified_count+' unverified')]:[]),...(row.status==='Approved'?[fact('Approved net amount',available(report.normalized.net_amount)+' '+available(report.normalized.currency))]:[])));
     if(row.review_available)summary.append(el('div',{class:'action-row'},button('Approve invoice',()=>reviewDialog(row,'approve'),'primary'),button('Reject invoice',()=>reviewDialog(row,'reject'),'danger'),button('Recheck saved extraction',async()=>{try{await mutate('/invoices/'+row.id+'/recheck',{revision:row.revision},crypto.randomUUID());notify('Saved extraction rechecked against the source and current procurement data.');await renderInvoice(row.id,routeVersion);}catch(error){notify(error.message);}})));
     else if(row.imported)summary.append(el('p',{class:'source-foot'},'Imported historical record. Review actions follow its original backend state; process a new attempt when review is unavailable.'));
     if(report.decision.comms && row.status!=='Approved')summary.append(el('section',{class:'communication'},el('h3',{},'Suggested communication'),el('span',{class:'sub'},'Audience: '+report.decision.comms.audience),el('h4',{},report.decision.comms.subject),el('p',{class:'communication-body'},report.decision.comms.body)));
   }
-  if(!['queued','running'].includes(row.state) && row.status!=='Approved' && row.document_available)summary.append(el('div',{class:'action-row'},button('Process new attempt',()=>retryDialog(row))));
+  if(row.retry_available!==false && !['queued','running'].includes(row.state) && row.status!=='Approved' && row.document_available)summary.append(el('div',{class:'action-row'},button('Process new attempt',()=>retryDialog(row))));
   const top=el('div',{class:'detail-grid'},el('div',{},preview,row.document_available?el('a',{class:'back',href:source,target:'_blank',rel:'noopener'},'Open source document ↗'):null),summary);
   const tabs=el('div',{class:'tabs',role:'tablist','aria-label':'Invoice details'}),panel=el('div',{role:'tabpanel',id:'invoice-panel'});
   const renderTab=()=>{
@@ -406,7 +461,12 @@ setInterval(async()=>{
   pollBusy=true;
   try {
     if(current.id && current.section==='invoices')await renderInvoice(current.id,current.version,true);
-    else if(!current.id && ['invoices','developer'].includes(current.section))await refreshList(current);
+    else if(!current.id && ['invoices','developer','purchase-orders','vendors'].includes(current.section))await refreshList(current);
   } catch(error) {notify('Progress refresh failed. '+error.message);}finally{pollBusy=false;}
 },2000);
-(async()=>{try{config=await api('/config');await renderRoute();}catch(error){main.replaceChildren(pageHead('Local server unavailable',error.message,button('Try again',()=>location.reload())));}})();
+(async()=>{try{
+  config=await api('/config');
+  if(config.demo_notice)document.querySelector('.content-shell').prepend(el('div',{class:'demo-banner',role:'note'},config.demo_notice));
+  if(!can('admin','reviewer'))for(const link of document.querySelectorAll('[data-section="vendors"],[data-section="purchase-orders"],[data-section="developer"]'))link.hidden=true;
+  await renderRoute();
+}catch(error){main.replaceChildren(pageHead('Server unavailable',error.message,button('Try again',()=>location.reload())),el('a',{href:'/auth/login'},'Sign in'));}})();

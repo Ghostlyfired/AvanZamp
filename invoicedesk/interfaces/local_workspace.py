@@ -1,7 +1,7 @@
 """Isolated local SQLite workspace. All UI mutations use short serialized transactions."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from datetime import date
 from decimal import Decimal, InvalidOperation
 import hashlib
@@ -25,6 +25,8 @@ from invoicedesk.infrastructure.documents import inspect_document
 from invoicedesk.infrastructure.extraction.llm import LlmClient
 from invoicedesk.pipeline import run_invoice
 from invoicedesk.policy import Policy
+from invoicedesk.domain.procurement import fulfillment, next_vendor_number
+from invoicedesk.infrastructure.locking import lock_file
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS ui_jobs(
@@ -144,7 +146,7 @@ class Workspace:
             staging = self.root/'initializing.sqlite3'
             if self.source.is_file() and self.source != self.path:
                 # Read-only URI plus SQLite backup includes committed WAL data.
-                with sqlite3.connect(self.source.as_uri()+'?mode=ro', uri=True) as src, sqlite3.connect(staging) as dest:
+                with closing(sqlite3.connect(self.source.as_uri()+'?mode=ro', uri=True)) as src, closing(sqlite3.connect(staging)) as dest:
                     src.backup(dest)
             else:
                 from invoicedesk.seed import reset
@@ -160,6 +162,9 @@ class Workspace:
             db.conn.execute('PRAGMA journal_mode=WAL')
             with db.conn:
                 db.conn.execute('INSERT OR IGNORE INTO ui_metadata VALUES (?,?)', ('source_database', str(self.source)))
+                previous = db.rows("SELECT value FROM ui_metadata WHERE key='vendor_sequence'")
+                high = next_vendor_number([v['vendor_id'] for v in db.vendors()], int(previous[0]['value']) if previous else 0)-1
+                db.conn.execute("INSERT INTO ui_metadata(key,value) VALUES ('vendor_sequence',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(str(high),))
                 for entity, rows, field in [('vendors', db.vendors(), 'vendor_id'), ('purchase-orders', db.pos(), 'po_number')]:
                     for row in rows:
                         db.conn.execute('INSERT OR IGNORE INTO ui_revisions VALUES (?,?,1)', (entity, row[field]))
@@ -238,10 +243,21 @@ class Workspace:
                 else:
                     approved = db.billed(identity)
                     net = Decimal(row['net_amount'])
-                    row.update(approved_amount=str(approved),remaining_amount=str(net-approved),overage_amount=str(max(Decimal(0),approved-net)),
-                        fully_approved=approved >= net,receipt_count=len(db.rows('SELECT run_id FROM runs WHERE matched_po=?',(identity,))),
+                    row.update(**fulfillment(net, approved),receipt_count=len(db.rows('SELECT run_id FROM runs WHERE matched_po=?',(identity,))),
                         vendor_name=one(db,'SELECT name FROM vendors WHERE vendor_id=?',(row['vendor_id'],))['name'])
+                    row['accepted_invoice_count'] = len(db.rows('SELECT run_id FROM pilot_ledger WHERE po_number=?',(identity,)))
+                    row['pending_amount'] = str(sum((Decimal(r['net_amount']) for r in db.rows("SELECT net_amount FROM runs WHERE matched_po=? AND review_status='pending'",(identity,)) if r['net_amount']), Decimal(0)))
+                    for name in ('line_items', 'charge_allowances'):
+                        row[name] = json.loads(row.pop(name+'_json', '[]'))
             return rows
+
+    def reserve_vendor_id(self, key):
+        def action(db):
+            previous = db.rows("SELECT value FROM ui_metadata WHERE key='vendor_sequence'")
+            number = next_vendor_number([v['vendor_id'] for v in db.vendors()], int(previous[0]['value']) if previous else 0)
+            db.conn.execute("INSERT INTO ui_metadata(key,value) VALUES ('vendor_sequence',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(str(number),))
+            return {'vendor_id': f'V-{number:03d}'}
+        return self.command(key,dict(action='reserve_vendor_id'),action)
 
     def record(self, entity, identity):
         field = 'vendor_id' if entity == 'vendors' else 'po_number'
@@ -289,6 +305,9 @@ class Workspace:
                     tax_rate=decimal_text(data.get('tax_rate','0')),currency=currency,status=status,issue_date=issued)
                 if Decimal(values['tax_rate'])>1:
                     raise ValueError('Tax rate must be between 0 and 1.')
+                from invoicedesk.domain.master import PurchaseOrderLine, ChargeAllowance
+                for name, model in [('line_items', PurchaseOrderLine), ('charge_allowances', ChargeAllowance)]:
+                    values[name+'_json'] = canonical([model.model_validate(v).model_dump(mode='json') for v in data.get(name,[])])
                 if identity:
                     old = one(db,'SELECT * FROM purchase_orders WHERE po_number=?',(identity,))
                     if db.rows('SELECT run_id FROM runs WHERE matched_po=?',(identity,)) and any(values[k] != old[k] for k in ('vendor_id','currency')):
@@ -296,6 +315,10 @@ class Workspace:
                     if Decimal(values['net_amount']) < db.billed(identity):
                         raise Conflict('PO net amount cannot be reduced below approved postings.')
             table = 'vendors' if entity == 'vendors' else 'purchase_orders'
+            if entity == 'vendors':
+                previous = db.rows("SELECT value FROM ui_metadata WHERE key='vendor_sequence'")
+                high = next_vendor_number([selected], int(previous[0]['value']) if previous else 0)-1
+                db.conn.execute("INSERT INTO ui_metadata(key,value) VALUES ('vendor_sequence',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(str(high),))
             if identity:
                 updates = {k:v for k,v in values.items() if k!=field}
                 db.conn.execute(f"UPDATE {table} SET {','.join(k+'=?' for k in updates)} WHERE {field}=?",(*updates.values(),identity))
@@ -373,6 +396,9 @@ class Workspace:
                     current_report = json.loads(selected['data_json'])
                     inv = current_report.get('extraction',inv)
                     row['decision'] = current_report.get('decision',{}).get('outcome',row['decision'])
+                    row['vendor_id'] = current_report.get('vendor_id',row['vendor_id'])
+                    row['matched_po'] = current_report.get('po_number',row['matched_po'])
+                    row['gross_amount'] = current_report.get('normalized',{}).get('gross_amount',row['gross_amount'])
                 row['invoice_number'] = inv.get('invoice_number')
                 row['issuer'] = inv.get('vendor_name') or (inv.get('sender') or {}).get('name')
                 row['currency'] = inv.get('currency')
@@ -423,15 +449,11 @@ class Workspace:
                     report['original_decision'] = original_report['decision']
                     report['revalidated'] = True
                 # Compact presentation fields keep technical paths in the full checks below.
-                report['summary'] = ('Checks passed. Human approval is required before posting.'
+                report['summary'] = ('Checks passed. Awaiting final approval transaction.'
                     if report['decision']['outcome']=='AUTO_APPROVE' else report['decision']['summary'])
                 if run['review_status']=='approved':
                     report['summary'] = 'Invoice approved. Authorized net amount posted to the PO ledger.'
-                concise = {
-                    'extraction_integrity':'Extraction needs verification; inspect the sections and checks.',
-                    'source_grounding':'Some values require source confirmation; inspect the evidence in Checks.',
-                }
-                report['summary_reasons'] = [concise.get(c['check_id'],c['detail'])
+                report['summary_reasons'] = [c['detail']
                     for c in report['checks'] if c.get('proposed') or c['status'] in {'WARN','INFO'}]
                 review_available = bool(context_data and context_data.get('profile')=='pilot' and run['review_status']=='pending' and summary['status']=='Needs review' and not db.rows('SELECT id FROM ui_jobs WHERE parent_id=?',(identity,)))
             return dict(**summary,report=report,events=events,review_available=review_available,document_available=bool(job['document_path'] and Path(job['document_path']).is_file()),
@@ -510,17 +532,7 @@ class Workspace:
                 invoice, references, metadata = verified
                 findings = reconcile(invoice,policy.extraction.reconcile_abs_tolerance)
                 rec = evaluate(invoice,findings,db.snapshot(exclude=job['run_id']),policy,revision,source_evidence=references)
-                amount = authorize(rec,policy,reason,confirmed_source)
-                decimal_text(str(amount),positive=True)
-                if rec.po_number != run['matched_po']:
-                    raise ApprovalBlocked('PO resolution changed. Reprocess before approval.')
-                number = json.loads(rec.interpretation.normalized_json)['invoice_number_key']
-                for original in db.rows('SELECT r.* FROM runs r JOIN pilot_ledger l ON l.run_id=r.run_id'):
-                    row = db.effective_run(original)
-                    if row['vendor_id']==rec.vendor_id and json.loads(row['normalized_json']).get('invoice_number_key')==number:
-                        raise ApprovalBlocked('This vendor invoice is already posted to the ledger.')
-                db.conn.execute('INSERT INTO pilot_ledger VALUES (?,?,?,?,?,?)',(job['run_id'],rec.po_number,str(amount),'local operator',reason,rec.context.model_dump_json()))
-                db.conn.execute('INSERT INTO ui_artifacts VALUES (?,?,?)',(identity,'approval_recheck',canonical(self.validation_report(rec,invoice,findings,references,metadata))))
+                self.commit_approval(db,job,rec,invoice,findings,references,metadata,'local operator',reason,confirmed_source)
             elif not reason.strip():
                 raise ValueError('A rejection reason is required.')
             state = 'approved' if approve else 'rejected'
@@ -530,6 +542,23 @@ class Workspace:
             self.audit(db,'invoices',identity,state,dict(reason=reason,confirmed_source=confirmed_source))
             return {'id':identity,'review_status':state,'revision':revision+1}
         return self.command(key,dict(action='approve' if approve else 'reject',identity=identity,revision=revision,reason=reason,confirmed_source=confirmed_source),action)
+
+    def commit_approval(self, db, job, rec, invoice, findings, references, metadata, actor, reason, confirmed_source=False):
+        """Caller holds BEGIN IMMEDIATE; manual and automatic posting share invariants."""
+        from invoicedesk.domain.approval import authorize_automatic
+        policy = Policy.load()
+        amount = authorize_automatic(rec,policy) if actor=='system' else authorize(rec,policy,reason,confirmed_source)
+        decimal_text(str(amount),positive=True)
+        run = one(db,'SELECT * FROM runs WHERE run_id=?',(job['run_id'],))
+        if rec.po_number != run['matched_po']:
+            raise ApprovalBlocked('PO resolution changed. Reprocess before approval.')
+        number = json.loads(rec.interpretation.normalized_json)['invoice_number_key']
+        for original in db.rows('SELECT r.* FROM runs r JOIN pilot_ledger l ON l.run_id=r.run_id'):
+            row = db.effective_run(original)
+            if row['vendor_id']==rec.vendor_id and json.loads(row['normalized_json']).get('invoice_number_key')==number:
+                raise ApprovalBlocked('This vendor invoice is already posted to the ledger.')
+        db.conn.execute('INSERT INTO pilot_ledger VALUES (?,?,?,?,?,?)',(job['run_id'],rec.po_number,str(amount),actor,reason,rec.context.model_dump_json()))
+        db.conn.execute('INSERT INTO ui_artifacts VALUES (?,?,?)',(job['id'],'approval_recheck',canonical(self.validation_report(rec,invoice,findings,references,metadata))))
 
     def retry(self, identity, revision, key):
         new_id = uuid.uuid4().hex
@@ -570,13 +599,12 @@ class Workspace:
 
     def clean_invoices(self):
         """Explicit local test reset. Procurement data and its history are preserved."""
-        import fcntl
         from datetime import datetime, timezone
         if self.thread and self.thread.is_alive():
             raise RuntimeError('Stop the running UI server before cleaning invoices.')
         with (self.root/'worker.lock').open('a') as lock:
             try:
-                fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                lock_file(lock)
             except BlockingIOError:
                 raise RuntimeError('Stop the running UI server before cleaning invoices.') from None
             with self.db() as db:
@@ -610,10 +638,9 @@ class Workspace:
                     raise
 
     def start(self):
-        import fcntl
         self._lock_file = (self.root/'worker.lock').open('a')
         try:
-            fcntl.flock(self._lock_file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            lock_file(self._lock_file)
         except BlockingIOError:
             self._lock_file.close()
             raise RuntimeError('Another local UI server already owns this workspace.') from None
@@ -662,11 +689,14 @@ class Workspace:
             with self.db(identity) as db:
                 if inspect_document(Path(job['document_path'])).sha256 != job['sha256']:
                     raise ValueError('Stored document integrity mismatch.')
+                db_events = []
                 for event in run_invoice(Path(job['document_path']),db=db,policy=Policy.load(),llm=client):
+                    db_events.append(event)
                     # Each yielded stage becomes visible before the next (possibly slow) stage.
                     with db.conn:
                         db.conn.execute('UPDATE ui_jobs SET run_id=COALESCE(run_id,?) WHERE id=?',(event.run_id,identity))
                         db.conn.execute('INSERT INTO ui_events VALUES (?,?,?)',(identity,event.seq,event.model_dump_json()))
+                db.conn.execute('BEGIN IMMEDIATE')
                 with db.conn:
                     # Correct the storage basename to the original sender filename.
                     db.conn.execute('UPDATE runs SET filename=? WHERE run_id=?',(job['filename'],event.run_id))
@@ -675,6 +705,22 @@ class Workspace:
                         cache_hit=client.cache_hit,usage=client.usage,token_usage=client.token_usage,response_ms=client.response_ms,fingerprint=client.fingerprint,pdf_reader=os.getenv('INVOICEDESK_PARSER')))))
                     run = one(db,'SELECT extraction_path FROM runs WHERE run_id=?',(event.run_id,))
                     failed = run['extraction_path']=='failed'
+                    if not failed:
+                        from invoicedesk.domain.contracts import EvidenceReference
+                        row = one(db,'SELECT * FROM runs WHERE run_id=?',(event.run_id,))
+                        invoice = ExtractedInvoice.model_validate_json(row['extraction_json'])
+                        refs = tuple(EvidenceReference.model_validate(ref) for ref in next(e.payload.get('source_evidence',[]) for e in db_events if e.stage=='extract' and e.state=='completed'))
+                        policy = Policy.load()
+                        findings = reconcile(invoice,policy.extraction.reconcile_abs_tolerance)
+                        rec = evaluate(invoice,findings,db.snapshot(exclude=event.run_id),policy,source_evidence=refs)
+                        report = self.validation_report(rec,invoice,findings,refs,{'verification':'processing'})
+                        db.conn.execute('INSERT INTO ui_artifacts VALUES (?,?,?)',(identity,'validation_recheck:0000000001',canonical(report)))
+                        if rec.decision.outcome.value=='AUTO_APPROVE':
+                            posting_job = dict(job,run_id=event.run_id)
+                            reason = 'All mandatory procurement checks passed.'
+                            self.commit_approval(db,posting_job,rec,invoice,findings,refs,{},'system',reason)
+                            db.conn.execute("UPDATE runs SET review_status='approved',reviewer_note=?,reviewed_at=? WHERE run_id=?",(reason,now(),event.run_id))
+                            self.audit(db,'invoices',identity,'auto_approved',{'context':rec.context.model_dump(mode='json')},actor='system')
                     error = dict(code=client.failure_kind or 'extraction_failed',message='Extraction could not complete. See retained checks and timeline; retry explicitly.') if failed else None
                     db.conn.execute('UPDATE ui_jobs SET state=?,finished_at=?,error_json=? WHERE id=?',('errored' if failed else 'completed',now(),canonical(error) if error else None,identity))
                     self.audit(db,'invoices',identity,'errored' if failed else 'processed',{'run_id':event.run_id,'error':error},actor='system')

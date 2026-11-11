@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: avanzamp-demo
+    runtime: docker
+    plan: free
+    numInstances: 1
+    dockerfilePath: ./Dockerfile.hackathon
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: DEMO_PUBLIC_ORIGIN
+        sync: false
+      - key: DEMO_USERNAME
+        sync: false
+      - key: DEMO_PASSWORD
+        sync: false
+      - key: LLM_PROVIDER
+        value: openai
+      - key: LLM_MODEL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false

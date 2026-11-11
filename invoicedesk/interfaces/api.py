@@ -52,13 +52,21 @@ def create_app(repository, storage, security: SecuritySettings, *, production: b
             from invoicedesk.infrastructure.preflight import require_production_dependencies
             require_production_dependencies()
             from invoicedesk.infrastructure.preflight import require_evaluated_model
-            require_evaluated_model()
+            require_evaluated_model(mode='live')
         yield
     app = FastAPI(title='InvoiceDesk pilot backend', version='1.0.0', lifespan=lifespan,
-                  description='Single-company recommendations and human-authorized ledger posting. Operator UI and release acceptance pending.')
+                  description='Single-company invoice extraction, automatic approval, review and exact PO ledger posting.')
     app.add_middleware(ServerSessionMiddleware, store=DatabaseSessions(repository, security.session_seconds))
     from urllib.parse import urlsplit
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[urlsplit(security.origin).hostname, 'localhost'])
+    @app.middleware('http')
+    async def response_security(request: Request, call_next):
+        response = await call_next(request)
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Referrer-Policy'] = 'same-origin'
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
+        return response
     oauth = OAuth()
     oauth.register(name='company', client_id=security.client_id, client_secret=security.client_secret,
                    server_metadata_url=security.issuer.rstrip('/')+'/.well-known/openid-configuration',
@@ -143,7 +151,7 @@ def create_app(repository, storage, security: SecuritySettings, *, production: b
             raise HTTPException(401, 'OIDC login failed.') from None
         request.session.clear()
         request.session.update(subject=user.subject, csrf=secrets.token_urlsafe(32))
-        return RedirectResponse('/v1/me', status_code=303)
+        return RedirectResponse('/', status_code=303)
 
     @app.get('/v1/me')
     def me(request: Request, user: User):
@@ -265,6 +273,25 @@ def create_app(repository, storage, security: SecuritySettings, *, production: b
             return {'revision': body.revision+1}
         return repository.command(user.subject, idempotency_key, dict(action='administer', kind=kind, **body.model_dump()), action)
 
+    # The same UI contract is backed by durable production services and OIDC.
+    # No local SQLite worker or unauthenticated local middleware is mounted here.
+    from .local_api import create_app as operator_app
+    from .production_workspace import ProductionWorkspace
+    workspace = ProductionWorkspace(repository, storage)
+    app.state.workspace = workspace
+    async def operator_guard(request: Request):
+        if not request.session.get('subject') and 'text/html' in request.headers.get('accept','') and not request.url.path.startswith('/api/'):
+            raise HTTPException(307, headers={'Location':'/auth/login'})
+        user = current_user(request)
+        if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
+            mutation(request, user)
+        request.state.operator = user
+    shell = operator_app(workspace, start_worker=False)
+    app.include_router(shell.router, dependencies=[Depends(operator_guard)])
+    from pydantic import ValidationError
+    from fastapi.exceptions import RequestValidationError
+    for kind in (ValidationError, RequestValidationError):
+        app.add_exception_handler(kind, shell.exception_handlers[kind])
     return app
 
 

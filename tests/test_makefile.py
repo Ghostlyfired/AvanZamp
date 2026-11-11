@@ -4,6 +4,10 @@ import os
 import shlex
 import sqlite3
 import subprocess
+import shutil
+import pytest
+
+pytestmark = pytest.mark.skipif(not shutil.which('make') or os.name=='nt', reason='Make targets require a POSIX shell; CLI is tested separately.')
 
 from invoicedesk.policy import ROOT
 

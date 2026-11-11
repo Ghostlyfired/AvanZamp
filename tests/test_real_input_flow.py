@@ -86,9 +86,9 @@ def test_live_never_uses_synthetic_fixture(tmp_path,monkeypatch):
     client.extract_invoice(path)
     assert len(calls)==1 and not client.cache_hit
     assert client.provenance=='api_recording'
-    # Same-model cache avoids another API request.
+    # Every live extraction makes a new request, even with an audit recording.
     client.extract_invoice(path)
-    assert len(calls)==1 and client.cache_hit
+    assert len(calls)==2 and not client.cache_hit
 
 
 def test_default_mode_makes_no_network_calls(monkeypatch):
@@ -178,7 +178,7 @@ def test_provider_injection_and_cache_namespace(tmp_path,monkeypatch):
     first.extract_invoice(path)
     assert calls==[('provider-a','model-1')]
     first.extract_invoice(path)
-    assert first.cache_hit and len(calls)==1
+    assert not first.cache_hit and len(calls)==2
     second=LlmClient('live',tmp_path/'cache',provider=CustomProvider('provider-b'),model='model-1')
     second.extract_invoice(path)
     assert not second.cache_hit and calls[-1]==('provider-b','model-1')

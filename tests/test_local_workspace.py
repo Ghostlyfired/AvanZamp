@@ -229,6 +229,9 @@ def test_recheck_is_revisioned_preserves_history_and_never_posts(workspace):
 
 def source_backed_invoice(workspace,tmp_path):
     from scripts.pdf_fallback import write_pdf
+    # This source prints zero tax: its authorized test PO must have that basis.
+    with workspace.db() as db, db.conn:
+        db.conn.execute("UPDATE purchase_orders SET tax_rate='0' WHERE po_number='PO-1001'")
     source=tmp_path/'source-backed.pdf'
     lines=['Invoice','Vendor: Northwind Office Supplies Ltd','Invoice No: DIRECT-FACTS-1',
         'Invoice date: 20/11/2026','PO Number: PO-1001','Currency: US$',
@@ -313,10 +316,10 @@ def test_invoice_clean_keeps_procurement_and_restores_balances(workspace):
 
 
 def test_invoice_clean_refuses_a_running_server(workspace):
-    import fcntl
+    from invoicedesk.infrastructure.locking import lock_file
     identity=upload(workspace)
     with (workspace.root/'worker.lock').open('a') as lock:
-        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        lock_file(lock)
         with pytest.raises(RuntimeError,match='Stop the running UI'):
             workspace.clean_invoices()
     assert workspace.job(identity)['state']=='queued'

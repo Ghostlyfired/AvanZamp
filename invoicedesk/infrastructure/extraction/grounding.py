@@ -82,6 +82,8 @@ def ground(inv: ExtractedInvoice, text: str, *, pages: list[str] | None = None) 
         elif name in {'sender', 'recipient', 'adjustments', 'line_items'}:
             root = value.model_dump() if hasattr(value, 'model_dump') else [item.model_dump() for item in value]
             paths = leaves(root, name)
+            if name == 'line_items':
+                paths = [path for path in paths if path.rsplit('.', 1)[-1] not in {'supplier_name', 'unit'}]
             referenced = bool(paths) and all(path in verified for path in paths)
             def supported_parts(part):
                 if isinstance(part, dict):

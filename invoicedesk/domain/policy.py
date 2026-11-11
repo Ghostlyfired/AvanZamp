@@ -19,13 +19,14 @@ class Duplicates(BaseModel):
 class ImpliedPo(BaseModel):
     min_confidence: float
     min_margin: float
+    min_content_similarity: float = 0.80
     weights: dict[str, float]
 
 class Extraction(BaseModel):
     reconcile_abs_tolerance: Decimal
 
 class Policy(BaseModel):
-    version: str = "pilot-1"
+    version: str = "invoice-policy-2"
     currency: str = "USD"
     matching_adapter: str = "rapidfuzz"
     critical_fields: list[str]
@@ -55,7 +56,7 @@ class Policy(BaseModel):
             raise ValueError('Invalid implied PO weights.')
         if abs(sum(self.implied_po.weights.values()) - 1) > 1e-9:
             raise ValueError('Implied PO weights must sum to one.')
-        if not all(0 <= v <= 1 for v in [self.implied_po.min_confidence, self.implied_po.min_margin, self.duplicates.near_desc_similarity]):
+        if not all(0 <= v <= 1 for v in [self.implied_po.min_confidence, self.implied_po.min_margin, self.implied_po.min_content_similarity, self.duplicates.near_desc_similarity]):
             raise ValueError('Confidence thresholds must be between zero and one.')
         return self
 

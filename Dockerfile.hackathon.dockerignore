@@ -1,0 +1,17 @@
+# Allowlist the complete build context; never send local state or recordings.
+*
+!Dockerfile.hackathon
+!requirements.lock
+!policy.yaml
+!invoicedesk/
+!invoicedesk/**
+!data/
+!data/vendors.csv
+!data/purchase_orders.csv
+**/__pycache__
+**/*.pyc
+**/.env*
+**/*.sqlite*
+**/*.db
+**/*.key
+**/*.pem

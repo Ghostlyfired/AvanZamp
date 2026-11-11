@@ -23,8 +23,8 @@ def test_explicit_results_are_independent_and_preserve_partial_cache_uncertainty
     path = ROOT/'data/examples/office_furniture.png'
     first = client.extract_result(path)
     second = client.extract_result(path)
-    assert provider.calls == 1
-    assert first.api_calls == 1 and second.api_calls == 0 and second.cache_hit
+    assert provider.calls == 2
+    assert first.api_calls == second.api_calls == 1 and not second.cache_hit
     assert first.issues_json == second.issues_json
     assert first.provenance == second.provenance == 'api_recording_partial'
     assert first.facts['total'] == '100.00'

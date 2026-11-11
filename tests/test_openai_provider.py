@@ -127,6 +127,10 @@ def test_cli_loads_dotenv_provider_and_model(tmp_path,monkeypatch,capsys):
 
 def test_make_respects_dotenv_and_explicit_mode(tmp_path,monkeypatch):
     import os
+    import shutil
+    if os.name=='nt' or not shutil.which('make'):
+        pytest.skip('Make integration requires a POSIX shell; provider/CLI tests run separately.')
+    import os
     import subprocess
     for name in ['LLM_MODE','LLM_PROVIDER','LLM_MODEL']:
         monkeypatch.delenv(name,raising=False)

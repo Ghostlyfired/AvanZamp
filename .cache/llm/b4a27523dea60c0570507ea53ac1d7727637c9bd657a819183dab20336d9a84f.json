@@ -1,0 +1,36 @@
+{
+  "provenance": "synthetic_fixture",
+  "source": "scripts/generate_test_data.py; NOT an API recording",
+  "extraction": {
+    "vendor_name": "Greenfield Catering Co",
+    "invoice_number": "GC-2210",
+    "invoice_date": "2026-10-29",
+    "po_reference": null,
+    "currency": "USD",
+    "subtotal": "3000.00",
+    "tax_amount": "240.00",
+    "total": "3240.00",
+    "prices_include_tax": false,
+    "reference_text": "Q4 team offsite catering - 40 guests",
+    "line_items": [
+      {
+        "description": "Q4 team offsite catering - 40 guests",
+        "quantity": "1",
+        "unit_price": "3000",
+        "amount": "3000"
+      }
+    ],
+    "evidence": {
+      "vendor_name": "Vendor: Greenfield Catering Co",
+      "invoice_number": "Invoice No: GC-2210",
+      "invoice_date": "Invoice date: 2026-10-29",
+      "currency": "Currency: USD",
+      "subtotal": "Item: Q4 team offsite catering - 40 guests | 1 | 3000.00 | 3000.00",
+      "tax_amount": "Tax: 240.00",
+      "total": "Total Due: 3240.00",
+      "reference_text": "Re: Q4 team offsite catering - 40 guests",
+      "prices_include_tax": "Tax: 240.00",
+      "line_items": "Item: Q4 team offsite catering - 40 guests | 1 | 3000.00 | 3000.00"
+    }
+  }
+}

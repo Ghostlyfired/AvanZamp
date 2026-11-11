@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .models import CheckResult, Decision, ExtractedInvoice, NormalizedInvoice
 from .policy import Policy
 
-RULE_VERSION = 'pilot-rules-4'
+RULE_VERSION = 'invoice-rules-5'
 
 
 def canonical(value: Any) -> str:

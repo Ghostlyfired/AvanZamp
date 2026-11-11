@@ -1,4 +1,5 @@
 import pytest
+import os
 from invoicedesk.interfaces.security import SecuritySettings, identity_from_claims, csrf_valid
 from invoicedesk.infrastructure.storage import LocalStorage
 
@@ -28,10 +29,16 @@ def test_content_storage_does_not_accept_traversal_or_symlinks(tmp_path):
     storage = LocalStorage(tmp_path/'private')
     digest = storage.put(b'private example document')
     assert storage.path(digest).read_bytes() == b'private example document'
-    assert storage.path(digest).stat().st_mode & 0o077 == 0
+    if os.name != 'nt':  # Windows access is controlled by ACLs, not POSIX mode bits.
+        assert storage.path(digest).stat().st_mode & 0o077 == 0
     with pytest.raises(ValueError):
         storage.path('../outside')
     storage.path(digest).unlink()
-    (storage.root/digest).symlink_to(tmp_path/'outside')
+    try:
+        (storage.root/digest).symlink_to(tmp_path/'outside')
+    except OSError as exc:
+        if os.name=='nt' and getattr(exc,'winerror',None)==1314:
+            pytest.skip('Windows symlink creation requires developer mode or privilege.')
+        raise
     with pytest.raises(ValueError):
         storage.path(digest)

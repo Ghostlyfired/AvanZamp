@@ -1,5 +1,8 @@
-"""Route real documents through conservative parsing and optional model extraction."""
+"""Extract every live document with a model; independently verify printed facts."""
 from pathlib import Path
+from dataclasses import dataclass
+import json
+from invoicedesk.domain.contracts import canonical
 from invoicedesk.infrastructure.documents import inspect_document
 from invoicedesk.domain.models import ExtractedInvoice, Quality
 from invoicedesk.policy import Policy
@@ -14,44 +17,34 @@ META_FIELDS = {'field_evidence', 'field_quality', 'evidence', 'extraction_path',
 
 
 def merge_extraction(inv: ExtractedInvoice, other: ExtractedInvoice, *, provided_fields: set[str], invalid_fields: set[str], text: str, pages: list[str]) -> ExtractedInvoice:
-    inv.field_evidence = other.field_evidence
+    # The model reads the complete document and owns facts. The label parser is
+    # only an independent cross-check; it must never overwrite model output.
     ground(other, text, pages=pages)
     for key in set(ExtractedInvoice.model_fields) - provided_fields - META_FIELDS:
         other.field_quality.pop(key, None)
     for key in invalid_fields:
         if key in ExtractedInvoice.model_fields:
             other.field_quality[key] = Quality.UNVERIFIED
-    # If the model confirms a different printed value, preserve Tier 1 but flag the conflict.
-    for key in ExtractedInvoice.model_fields:
-        if key in META_FIELDS:
-            continue
-        if other.document_type not in {'invoice', 'unknown'} and key in {'vendor_name', 'invoice_number', 'invoice_date', 'due_date'}:
-            continue
-        if key in {'sender', 'recipient', 'adjustments', 'document_type'} and key not in provided_fields:
-            continue
+    scalar_checks = {'vendor_name', 'invoice_number', 'invoice_date', 'po_reference',
+                     'currency', 'subtotal', 'tax_amount', 'total'}
+    for key in scalar_checks:
         old, new = getattr(inv, key), getattr(other, key)
-        if old is None or old == [] or (key == 'document_type' and old == 'unknown'):
-            setattr(inv, key, new)
-            inv.field_quality[key] = other.field_quality.get(key, Quality.UNVERIFIED)
-        elif key == 'currency' and new is not None and currency_code(old) == currency_code(new):
-            inv.field_quality[key] = other.field_quality.get(key, Quality.UNVERIFIED)
-        elif new is not None and old != new:
-            inv.warnings.append(f'Tiers disagree: {key}')
-            inv.field_quality[key] = Quality.UNVERIFIED
-        elif new is None:
-            inv.warnings.append(f'Model did not confirm parsed field: {key}')
-            inv.field_quality[key] = Quality.UNVERIFIED
-        else:
-            inv.field_quality[key] = other.field_quality.get(key, Quality.UNVERIFIED)
-        if key in other.evidence:
-            inv.evidence[key] = other.evidence[key]
-    if inv.document_type not in {'invoice', 'unknown'}:
-        for key in ('vendor_name', 'invoice_number', 'invoice_date', 'due_date'):
-            setattr(inv, key, None)
-            inv.field_quality.pop(key, None)
-            inv.evidence.pop(key, None)
-    inv.warnings.extend(other.warnings)
-    return inv
+        if old is None or new is None or old == new:
+            continue
+        if key == 'currency' and currency_code(old) == currency_code(new):
+            continue
+        if isinstance(old, str) and isinstance(new, str):
+            from invoicedesk.domain.normalize import key as identifier_key
+            if identifier_key(old) == identifier_key(new):
+                continue
+        # Grounded monetary facts can resolve the narrow parser. Conflicting
+        # labelled identifiers still require review even if both occur in text.
+        if key in {'invoice_number', 'po_reference'} or other.field_quality.get(key) != Quality.GROUNDED:
+            other.warnings.append(f'Tiers disagree: {key}')
+            other.field_quality[key] = Quality.UNVERIFIED
+    other.warnings.extend(inv.warnings)
+    return other
+
 
 
 def extract(path: Path, policy: Policy, llm: LlmClient) -> tuple[ExtractedInvoice, list[dict]]:
@@ -60,12 +53,12 @@ def extract(path: Path, policy: Policy, llm: LlmClient) -> tuple[ExtractedInvoic
     pages = []
     needs_vision = not document.is_pdf
     read_warning = None
-    if document.is_pdf:
+    if document.is_pdf or llm.mode == 'live':
         try:
             source = read_document_text(path)
             text = source.text
             pages = source.pages
-            needs_vision = source.needs_vision
+            needs_vision = not document.is_pdf or source.needs_vision
         except Exception:
             # A text reader failure can still be recovered by the PDF-capable model.
             needs_vision = True
@@ -78,7 +71,9 @@ def extract(path: Path, policy: Policy, llm: LlmClient) -> tuple[ExtractedInvoic
         and any(finding['scope'] == 'total' for finding in findings)
         and all(finding['passed'] for finding in findings)
     )
-    if ready:
+    # Explicit offline/demo profiles preserve reproducible parser fixtures.
+    # Production live extraction always invokes the provider, including clean PDFs.
+    if ready and llm.mode != 'live':
         for key in ExtractedInvoice.model_fields:
             if key not in META_FIELDS:
                 if getattr(inv, key) is not None and getattr(inv, key) != []:
@@ -101,7 +96,6 @@ def extract(path: Path, policy: Policy, llm: LlmClient) -> tuple[ExtractedInvoic
     try:
         result = llm.extract_result(path)
         # Only this legacy adapter copies result data onto the historical client report interface.
-        import json
         llm.validation_issues = json.loads(result.issues_json)
         llm.provided_fields = set(result.provided_fields)
         llm.provided_paths = set(result.provided_paths)
@@ -127,9 +121,6 @@ def extract(path: Path, policy: Policy, llm: LlmClient) -> tuple[ExtractedInvoic
 
 
 # Primary application contract. The tuple-returning extract above is retained for Section 5 callers.
-from dataclasses import dataclass
-import json
-from invoicedesk.domain.contracts import canonical
 
 
 @dataclass(frozen=True)

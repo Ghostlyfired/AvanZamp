@@ -2,6 +2,7 @@
 import csv
 import hashlib
 import json
+import argparse
 from pathlib import Path
 from decimal import Decimal
 try:
@@ -66,6 +67,32 @@ def document_lines(f: dict, template: str) -> list[str]:
     lines += ['Payment terms: Net 30','Thank you for your business.']
     return lines
 
+
+def write_fixture(path: Path, f: dict, lines: list[str], cache: Path | None = None) -> Path:
+    """Pair existing synthetic PDF bytes with explicitly synthetic offline facts."""
+    evidence={k:next((line for line in lines if str(v) in line),'') for k,v in f.items()
+              if v is not None and k not in ['line_items','prices_include_tax']}
+    evidence['prices_include_tax']=next(line for line in lines if line.startswith(('VAT','Tax')))
+    evidence['line_items']=next(line for line in lines if line.startswith('Item:'))
+    fixture=dict(provenance='synthetic_fixture',source='scripts/generate_test_data.py; NOT an API recording',
+                 extraction={**f,'evidence':evidence})
+    cache=cache or ROOT/'.cache/llm'
+    cache.mkdir(parents=True,exist_ok=True)
+    destination=cache/(hashlib.sha256(path.read_bytes()).hexdigest()+'.json')
+    destination.write_text(json.dumps(fixture,indent=2)+'\n',encoding='utf-8')
+    return destination
+
+
+def generate_fixtures() -> list[Path]:
+    """Restore offline fixtures without rewriting PDFs, CSVs or the golden oracle."""
+    paths=[]
+    for spec in SPECS:
+        f=fields(spec)
+        if spec[8] in {'C','S'} or f['invoice_number'] is None:
+            path=ROOT/'data/invoices'/(spec[0]+'.pdf')
+            paths.append(write_fixture(path,f,document_lines(f,spec[8])))
+    return paths
+
 def generate() -> None:
     data = ROOT/'data'; invoices=data/'invoices'; invoices.mkdir(parents=True,exist_ok=True)
     with (data/'vendors.csv').open('w',newline='') as out:
@@ -98,15 +125,17 @@ def generate() -> None:
         route='llm_vision' if template=='S' else 'llm_text' if template=='C' or f['invoice_number'] is None else 'deterministic'
         golden.append(dict(file=path.name,order=order,expected_outcome=spec[9],expected_path=route,expected_driving_checks=spec[10]))
         if route.startswith('llm'):
-            evidence={k:next((line for line in lines if str(v) in line),'') for k,v in f.items() if v is not None and k not in ['line_items','prices_include_tax']}
-            # Boolean and line-item evidence is also explicit in the document.
-            evidence['prices_include_tax']=next(line for line in lines if line.startswith(('VAT','Tax')))
-            evidence['line_items']=next(line for line in lines if line.startswith('Item:'))
-            fixture=dict(provenance='synthetic_fixture',source='scripts/generate_test_data.py; NOT an API recording',extraction={**f,'evidence':evidence})
-            cache=ROOT/'.cache/llm'; cache.mkdir(parents=True,exist_ok=True)
-            (cache/(hashlib.sha256(path.read_bytes()).hexdigest()+'.json')).write_text(json.dumps(fixture,indent=2))
+            write_fixture(path,f,lines)
     duplicate=invoices/'12_exact_duplicate.pdf'; duplicate.write_bytes((invoices/'01_clean_exact.pdf').read_bytes())
     golden.append(dict(file=duplicate.name,order=12,expected_outcome='REJECT',expected_path='deterministic',expected_driving_checks=['duplicate_exact']))
     (data/'golden.json').write_text(json.dumps(golden,indent=2))
 
-if __name__=='__main__': generate()
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--fixtures-only',action='store_true',help='Restore synthetic offline extraction fixtures for existing PDF bytes; never regenerate documents.')
+    args=parser.parse_args()
+    if args.fixtures_only:
+        for path in generate_fixtures():
+            print(path.relative_to(ROOT))
+    else:
+        generate()

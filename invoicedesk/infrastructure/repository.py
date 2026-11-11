@@ -37,6 +37,8 @@ class Repository:
                 c.execute(s.vendors.insert().values(vendor_id=row['vendor_id'], data=row))
             for row in pos:
                 c.execute(s.pos.insert().values(po_number=row['po_number'], data=row, net_amount=Decimal(row['net_amount'])))
+            from invoicedesk.domain.procurement import next_vendor_number
+            c.execute(s.sequences.insert().values(key='vendor', value=next_vendor_number([v['vendor_id'] for v in vendors])-1))
             self.audit(c, 'system', 'initialize', 'company', {'revision': 1})
 
     def policy(self, c) -> Policy:
@@ -55,10 +57,13 @@ class Repository:
             if old is None or row['revision'] > old['revision']:
                 latest[row['job_id']] = row
         # Include pending interpretations in duplicate detection; only approved ledger entries consume money.
+        commitments = set(c.execute(sa.select(s.ledger.c.job_id)).scalars())
         runs = []
         for job_id, row in latest.items():
             report = row['data']
             runs.append(dict(run_id=job_id, vendor_id=report['vendor_id'],
+                             matched_po=report['po_number'], extraction_json=canonical(report['extraction']),
+                             review_status='approved' if job_id in commitments else 'pending',
                              decision_json=canonical(report['decision']),
                              normalized_json=canonical(report['normalized'])))
         balances: dict[str, Decimal] = {}
@@ -81,6 +86,18 @@ class Repository:
             result = action(c, company)
             c.execute(s.commands.insert().values(actor=actor, key=key, fingerprint=digest, result=result))
             return result
+
+    def reserve_vendor_id(self, actor, key):
+        from invoicedesk.domain.procurement import next_vendor_number
+        def action(c, company):
+            previous = c.execute(sa.select(s.sequences.c.value).where(s.sequences.c.key=='vendor')).scalar_one_or_none()
+            number = next_vendor_number(c.execute(sa.select(s.vendors.c.vendor_id)).scalars(), previous or 0)
+            if previous is None:
+                c.execute(s.sequences.insert().values(key='vendor',value=number))
+            else:
+                c.execute(s.sequences.update().where(s.sequences.c.key=='vendor').values(value=number))
+            return {'vendor_id': f'V-{number:03d}'}
+        return self.command(actor,key,dict(action='reserve_vendor_id'),action)
 
     def audit(self, c, actor: str, action: str, target: str, data: dict) -> None:
         c.execute(s.audit.insert().values(id=uid(), actor=actor, action=action, target=target, data=data, created_at=time.time()))
@@ -226,6 +243,14 @@ class Repository:
                         s.events.c.seq > after).order_by(s.events.c.seq).limit(200)).scalars())
 
     def administer(self, c, kind: str, data: dict) -> None:
+        if kind == 'vendor':
+            from invoicedesk.domain.procurement import next_vendor_number
+            previous = c.execute(sa.select(s.sequences.c.value).where(s.sequences.c.key=='vendor')).scalar_one_or_none()
+            high = next_vendor_number([data['vendor_id']], previous or 0)-1
+            if previous is None:
+                c.execute(s.sequences.insert().values(key='vendor',value=high))
+            else:
+                c.execute(s.sequences.update().where(s.sequences.c.key=='vendor').values(value=high))
         if kind == 'policy':
             policy = Policy.model_validate(data)
             c.execute(s.company.update().where(s.company.c.id == 1).values(policy=policy.model_dump(mode='json')))
@@ -233,6 +258,15 @@ class Repository:
             table, field = (s.vendors, 'vendor_id') if kind == 'vendor' else (s.pos, 'po_number')
             values = {field: data[field], 'data': data}
             if kind == 'po':
+                if not c.execute(sa.select(s.vendors.c.vendor_id).where(s.vendors.c.vendor_id==data['vendor_id'])).first():
+                    raise ValueError('Purchase orders must reference an existing vendor.')
+                billed = sum(c.execute(sa.select(s.ledger.c.amount).where(s.ledger.c.po_number==data['po_number'])).scalars(),Decimal(0))
+                if Decimal(data['net_amount']) < billed:
+                    raise Conflict('PO amount cannot be reduced below committed invoices.')
+                old = c.execute(sa.select(s.pos.c.data).where(s.pos.c.po_number==data['po_number'])).scalar_one_or_none()
+                referenced = any(report.get('po_number')==data['po_number'] for report in c.execute(sa.select(s.artifacts.c.data).where(s.artifacts.c.kind=='report')).scalars())
+                if old and referenced and any(old[k]!=data[k] for k in ('vendor_id','currency')):
+                    raise Conflict('Vendor and currency cannot change after invoice receipt.')
                 values['net_amount'] = Decimal(data['net_amount'])
             exists = c.execute(sa.select(table.c[field]).where(table.c[field] == data[field])).first()
             if exists:

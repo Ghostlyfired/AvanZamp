@@ -21,7 +21,7 @@ WEB = Path(__file__).with_name('web')
 
 class Action(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    revision: int = Field(ge=1)
+    revision: int = Field(ge=0)
     reason: str = Field(default='',max_length=4000)
     confirmed_source: bool = False
 
@@ -52,6 +52,8 @@ class POData(BaseModel):
     currency: str = Field(min_length=3,max_length=3)
     status: str = 'open'
     issue_date: str
+    line_items: list[dict] = Field(default_factory=list)
+    charge_allowances: list[dict] = Field(default_factory=list)
     revision: int | None = Field(default=None,ge=1)
 
 
@@ -62,7 +64,8 @@ def page(rows, q='', page=1, page_size=25):
     return dict(items=rows[(page-1)*page_size:page*page_size],total=len(rows),page=page,page_size=page_size)
 
 
-def create_app(workspace: Workspace | None = None, *, start_worker=True):
+def create_app(workspace: Workspace | None = None, *, start_worker=True,
+               allowed_hosts=None, allowed_origins=None, demo_notice=None):
     @asynccontextmanager
     async def lifespan(app):
         app.state.workspace = workspace or Workspace()
@@ -75,13 +78,14 @@ def create_app(workspace: Workspace | None = None, *, start_worker=True):
                 await run_in_threadpool(app.state.workspace.close)
 
     app = FastAPI(title='Acme Operations · InvoiceDesk local',lifespan=lifespan,docs_url=None,redoc_url=None)
-    app.add_middleware(TrustedHostMiddleware,allowed_hosts=['127.0.0.1','localhost','testserver'])
+    app.add_middleware(TrustedHostMiddleware,allowed_hosts=allowed_hosts or ['127.0.0.1','localhost','testserver'])
 
     @app.middleware('http')
     async def local_guard(request: Request, call_next):
         if request.method not in {'GET','HEAD','OPTIONS'}:
             origin = request.headers.get('origin')
-            if origin and origin not in {f'http://{request.headers.get("host")}',f'https://{request.headers.get("host")}'}:
+            origins = allowed_origins if allowed_origins is not None else {f'http://{request.headers.get("host")}',f'https://{request.headers.get("host")}'}
+            if (origin or allowed_origins is not None) and origin not in origins:
                 return JSONResponse({'error':{'code':'origin_rejected','message':'Use the local application to submit changes.'}},status_code=403)
             if request.url.path=='/api/v1/invoices/upload':
                 try:
@@ -114,12 +118,16 @@ def create_app(workspace: Workspace | None = None, *, start_worker=True):
         app.add_exception_handler(kind,exception_handler(status,code))
 
     def ws(request):
-        return request.app.state.workspace
+        workspace = request.app.state.workspace
+        return workspace.bind(request.state.operator) if hasattr(workspace,'bind') else workspace
 
     @app.get('/api/v1/config')
     def config(request: Request):
+        if hasattr(ws(request), 'config'):
+            return dict(ws(request).config(), csrf_token=request.session.get('csrf',''))
         return dict(company='Acme Operations Inc',mode='live',provider=os.getenv('LLM_PROVIDER','openai'),model=os.getenv('LLM_MODEL',''),
-                    operator='Local operator',workspace='private/ui',upload_limit_bytes=MAX_BYTES)
+                    operator='Demo judge' if demo_notice else 'Local operator',workspace='shared demo' if demo_notice else 'private/ui',
+                    upload_limit_bytes=MAX_BYTES,demo_notice=demo_notice)
 
     @app.get('/api/v1/invoices')
     def invoices(request: Request,q: str='',status: str='',page_number: int=Query(1,alias='page',ge=1),page_size: int=Query(25,ge=1,le=100)):
@@ -170,6 +178,10 @@ def create_app(workspace: Workspace | None = None, *, start_worker=True):
     @app.post('/api/v1/invoices/{identity}/retry',status_code=202)
     def retry(request: Request,identity: str,body: Action,key: str=Header(...,alias='Idempotency-Key')):
         return ws(request).retry(identity,body.revision,key)
+
+    @app.post('/api/v1/vendors/reserve-id')
+    def reserve_vendor_id(request: Request,key: str=Header(...,alias='Idempotency-Key')):
+        return ws(request).reserve_vendor_id(key)
 
     def management_router(entity):
         router = APIRouter(prefix='/api/v1/'+entity)

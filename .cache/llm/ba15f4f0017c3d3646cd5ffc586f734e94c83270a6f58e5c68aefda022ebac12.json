@@ -1,0 +1,36 @@
+{
+  "provenance": "synthetic_fixture",
+  "source": "scripts/generate_test_data.py; NOT an API recording",
+  "extraction": {
+    "vendor_name": "Summit Print & Packaging",
+    "invoice_number": null,
+    "invoice_date": "2026-10-27",
+    "po_reference": "PO-3001",
+    "currency": "USD",
+    "subtotal": "2400.00",
+    "tax_amount": "192.00",
+    "total": "2592.00",
+    "prices_include_tax": true,
+    "reference_text": "Printed brochures - product launch",
+    "line_items": [
+      {
+        "description": "Printed brochures - product launch",
+        "quantity": "1",
+        "unit_price": "2400",
+        "amount": "2400"
+      }
+    ],
+    "evidence": {
+      "vendor_name": "Vendor: Summit Print & Packaging",
+      "invoice_date": "Invoice date: 2026-10-27",
+      "po_reference": "Your order: PO-3001",
+      "currency": "Currency: USD",
+      "subtotal": "Item: Printed brochures - product launch | 1 | 2400.00 | 2400.00",
+      "tax_amount": "VAT incl.: 192.00",
+      "total": "Amount due: 2592.00",
+      "reference_text": "Re: Printed brochures - product launch",
+      "prices_include_tax": "VAT incl.: 192.00",
+      "line_items": "Item: Printed brochures - product launch | 1 | 2400.00 | 2400.00"
+    }
+  }
+}

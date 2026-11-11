@@ -1,78 +1,47 @@
 # InvoiceDesk
 
-Run the local operator UI with `make ui-install` then `make ui`, and open **http://127.0.0.1:8000**. It uses the actual configured LLM provider and an isolated copy of your existing database under `private/ui/`. See [local UI setup and verification](docs/LOCAL_UI.md).
+For a resettable, password-protected hackathon link on one Render Free service, follow [the Render demo deployment guide](docs/HACKATHON_RENDER.md). The demo starts with sample vendors/POs and separate, empty invoice history.
 
-Use `make ui-clean` to start with empty invoice history while keeping vendors and purchase orders. Stop the existing UI server first; the command backs up the local database before clearing invoice records and postings.
+InvoiceDesk extracts invoice facts with a fresh LLM request, validates them against authorized purchase orders, and automatically posts invoices that pass all mandatory checks. Other invoices retain a review report with the verdict, justification, source evidence, and next action. The model extracts facts; deterministic backend rules own decisions and ledger writes. No payments are executed.
 
-Run independent invoice-layout checks with `make verify-invoices VERIFY_DIR="/path/to/invoices"`. Each file gets its own disposable invoice history and ledger, using your current vendors/POs and the real configured LLM provider.
+## Run locally
 
-InvoiceDesk reads vendor invoices, runs deterministic procurement checks, and records an explained recommendation. Only an authorized human approval commits PO balance in the pilot. The LLM extracts printed facts; it never decides, approves, sends messages, or executes payments.
+Python 3.12 is the supported runtime. On Windows:
 
-This repository contains the original reproducible demo and a new single-company backend/API implementation. **It is not an accepted production pilot.** A local operator UI is now available; browser acceptance, real-document release evaluation, and operational acceptance remain outstanding. See [pilot architecture and acceptance](docs/PILOT.md) for architecture and remaining gates, and [executed verification](docs/VERIFICATION.md) for observed results.
-
-## Install and verify
-
-Python 3.12 is the deployment target. Tests use synthetic providers and block external network access.
-
-With the existing virtual environment, start the terminal demo with one command:
-
-```sh
-make run
+```powershell
+py -3.12 -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements-dev.lock
+.venv/Scripts/python.exe -m invoicedesk.interfaces.local_api
 ```
 
-Plain `make` does the same. Each run prepares a fresh demo database and processes the happy-path invoice, so repeat runs work without manual resets or API keys. Run `make help` for all commands. For a new environment, install dependencies first:
+The provided workspace already has a Python 3.12 environment. Open **http://127.0.0.1:8000**. Configure the provider, model and credentials in the ignored `.env`; never commit credentials. On POSIX use `.venv/bin/python` and the existing Make targets.
 
-```sh
-python3.12 -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.lock
-.venv/bin/python -m pip check
-.venv/bin/python -m pytest -q
+The local UI uses a private SQLite workspace and one trusted local operator. The authenticated production UI uses the same presentation with PostgreSQL, OIDC roles, CSRF protection and a separate durable worker. Local mode binds only to loopback.
+
+The local database created for this task contains sample vendors/POs plus the explicitly synthetic final-test procurement baseline. This baseline is suitable for exercising the supplied PDFs; it is not evidence of actual purchasing authorization. Production initialization never imports these test assumptions automatically.
+
+## Workflow
+
+- Vendor dialogs reserve sequential `V-001` identifiers; custom identifiers remain editable.
+- Every accepted live upload makes a fresh provider request, including repeated documents. Audit recordings never substitute for live extraction. Invalid or unsafe documents are rejected before provider access.
+- Critical identities, currency, financial cells, arithmetic, PO scope, charges and cumulative quantities are checked independently. Optional metadata errors remain visible without unnecessarily blocking an otherwise valid invoice.
+- Explicit PO references take precedence. Missing references require substantive content agreement and an unambiguous candidate.
+- Clean invoices post once under a transaction lock as actor `system`. Pending/rejected invoices consume no balance. Human approval uses the same financial invariants.
+- PO progress measures accepted billing, not physical receipt. Extra delivery charges require explicit authorization even when the PO has enough remaining money.
+
+## Verification
+
+```powershell
+.venv/Scripts/python.exe -m pytest -q
+.venv/Scripts/python.exe -m invoicedesk.interfaces.final_verify --output private/final-verification/run --workers 4
 ```
 
-The exact dependency pins are a candidate lock; a clean install could not be verified in the implementation environment because package-index network/DNS access was unavailable. CI checks installation, dependencies, tests, lint, types, and migrations.
+The first command is offline. The second uses the configured real provider and makes billable calls for all final PDFs in isolated workspaces. The four positive layouts repeat invoice identities, so independent cases are deliberate; submitting them together still invokes duplicate protection. Folder names and expected verdicts are never production decision inputs.
 
-The offline demo retains the 12 golden outcomes and their original order from `data/golden.json`. Its synthetic extraction fixtures remain paired with their PDFs. Demo recommendations consume balance under the **explicit demo profile**; this is deliberately different from human posting in the pilot.
+To create only the synthetic evaluation master, without processing invoices:
 
-```sh
-make demo-all                              # Reset and run all 12 samples in order
-make run FILE=path/to/invoice.pdf           # Process your own file; keep its history
-make run FILE=invoice.png LLM_MODE=live     # Use configured provider credentials
-make test
+```powershell
+.venv/Scripts/python.exe -m invoicedesk.interfaces.final_verify --bootstrap-only private/evaluation-master.sqlite3
 ```
 
-`make run` without `FILE`, `make demo`, and `make demo-all` reset only `DEMO_DB` (default `data/demo.sqlite3`), regardless of the database configured in `.env`. To inspect another demo edge case, use `make demo DEMO_FILE=data/invoices/11_scanned_implied_po.pdf`. Custom-file processing uses `.env`, accepts `DB=...`, `PROVIDER=...`, `MODEL=...`, and `OUTPUT=...`, and never resets history automatically.
-
-The Make demo targets explicitly select Poppler (`pdftotext`) and the development matcher for this offline environment. With the required Python dependencies installed, override them using `DEMO_PARSER=pdfplumber DEMO_MATCHER=rapidfuzz`. Production rejects development adapters and requires pdfplumber and rapidfuzz. There are no silent substitutions.
-
-For a manual CLI rehearsal, `python -m invoicedesk.cli reset --demo` still prepares the six-entry demo history. CLI `batch` processes the current history; use a clean demo database first, or use `make demo-all` to handle both steps. Never use demo state for a pilot company. The old local CLI/report imports remain compatibility adapters. Without a demo profile, the local SQLite preview never posts recommendations and is not the deployment backend.
-
-`scripts/generate_test_data.py` generates the golden PDFs and their paired synthetic extraction fixtures. `scripts/generate_example_invoice.py` generates the image/PDF examples in `data/examples/` (requires DejaVu Sans fonts). These examples and their generators remain test inputs, not evidence of real-document extraction accuracy.
-
-## Backend and API
-
-The modular monolith has four boundaries:
-
-- `domain/`: contracts, exact money, policy, semantic validation, reconciliation, checks, recommendations, approval invariants.
-- `application/`: processing and revision-aware job/review services.
-- `infrastructure/`: PostgreSQL/SQLAlchemy, private storage, provider adapters, parsing, telemetry.
-- `interfaces/`: FastAPI/OIDC, worker, CLI, and operational commands.
-
-Deploy using [Docker Compose](compose.yaml), [configuration template](.env.pilot.example), and the [operator runbook](docs/PILOT.md). API and worker use the same image; PostgreSQL leases durable jobs, and Caddy terminates HTTPS. No deployment or live model calls are performed by tests.
-
-Endpoints under `/v1` cover submissions, job status, replayable SSE, paginated history, detailed reports, protected document downloads, corrections, approval/rejection, explicit retries, and procurement administration. `/docs` and `/openapi.json` describe the API. Uploads use a streamed binary request body with `X-Filename`. Mutations require an idempotency key and session CSRF token; reviews and administration also require revisions.
-
-The trusted local CLI uses those same services:
-
-```sh
-.venv/bin/python -m invoicedesk.cli pilot --actor OIDC_SUBJECT submit invoice.pdf --key submission-1
-.venv/bin/python -m invoicedesk.cli pilot --actor OIDC_SUBJECT report JOB_ID
-.venv/bin/python -m invoicedesk.cli pilot --actor OIDC_SUBJECT approve JOB_ID --revision 1 --key approval-1 --reason 'Compared with source' --confirmed-source
-```
-
-Supply `DATABASE_URL`, `DOCUMENT_ROOT`, and the OIDC subject allowlist through the trusted deployment environment. CLI access to database credentials is privileged operator access; browser users authenticate through OIDC.
-
-## Product limits
-
-One company and approval currency, two-way invoice/PO matching, human-authorized ledger posting. No FX, goods receipts, email ingestion, payment execution, or extra BOM/advance approval engines. Scans retain unverified evidence. Typed values, arithmetic, source grounding, vendor identity, and approval remain separate results.
-
-The original [candidate plan](PROJECT_PLAN.md) preserves the brief and demo contracts. The [pilot contract amendment](docs/PILOT.md#contract-amendment) and current runbook describe the backend; the pilot rules above take precedence over the historical plan.
+See [executed verification](docs/VERIFICATION.md), [workflow contracts](docs/WORKFLOW.md), [local UI](docs/LOCAL_UI.md), and [production deployment](docs/PILOT.md). Production release additionally requires real OIDC/TLS acceptance, PostgreSQL concurrency/migration/restore checks, approved procurement data, and deployment ownership. Those external checks must not be inferred from offline tests.

@@ -17,7 +17,7 @@ def main():
     with repo.engine.begin() as c:
         repo.lock(c)
         heads = list(c.execute(sa.text('SELECT version_num FROM alembic_version')).scalars())
-        if heads != ['0001_pilot']:
+        if heads != ['0002_identifiers']:
             errors.append('Unexpected migration head.')
         for row in c.execute(sa.select(s.artifacts)).mappings():
             if fingerprint(row['data']) != row['sha256']:

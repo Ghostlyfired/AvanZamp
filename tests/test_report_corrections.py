@@ -1,6 +1,5 @@
 """Regression cases shaped like the observed report, with synthetic document facts."""
 from decimal import Decimal
-from invoicedesk.models import ExtractedInvoice
 from invoicedesk.extract.validation import parse_response
 from invoicedesk.extract.reconcile import reconcile
 from invoicedesk.extract.sections import section_report
@@ -87,7 +86,8 @@ def test_new_columns_are_unavailable_in_old_responses_and_retained_in_new_ones()
 
 
 def test_explicit_null_is_different_from_an_omitted_party_field():
-    raw=recorded_shape();raw['sender']['address']=None
+    raw=recorded_shape()
+    raw['sender']['address']=None
     _,_,sections=parts(raw)
     party=sections['sender']['party_validation']['sender']
     assert party['address']['status']=='MISSING'
@@ -103,7 +103,7 @@ def test_image_evidence_is_not_reported_as_independently_verified():
     assert 'no independent' in evidence['verification_note']
 
 
-def test_refresh_can_request_new_fields_but_default_reuses_cache(tmp_path):
+def test_live_requests_are_always_fresh_with_or_without_refresh(tmp_path):
     calls=[]
     class Provider:
         name='test'
@@ -112,8 +112,9 @@ def test_refresh_can_request_new_fields_but_default_reuses_cache(tmp_path):
             return ProviderResponse(recorded_shape())
     path=ROOT/'data/examples/office_furniture.png'
     client=LlmClient('live',tmp_path/'cache',provider=Provider(),model='test')
-    client.extract_invoice(path);client.extract_invoice(path)
-    assert len(calls)==1 and client.cache_hit
+    client.extract_invoice(path)
+    client.extract_invoice(path)
+    assert len(calls)==2 and not client.cache_hit
     fresh=LlmClient('live',tmp_path/'cache',provider=Provider(),model='test',refresh=True)
     fresh.extract_invoice(path)
-    assert len(calls)==2 and not fresh.cache_hit
+    assert len(calls)==3 and not fresh.cache_hit

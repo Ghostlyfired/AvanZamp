@@ -48,7 +48,7 @@ def test_a_real_identifier_disagreement_is_still_reviewed():
     source='Invoice\nInvoice No: FIRST-12\nOther reference SECOND-14'
     model=ExtractedInvoice(document_type='invoice',invoice_number='SECOND-14',evidence={'invoice_number':'SECOND-14'})
     merged=merge_extraction(parse(source),model,provided_fields=set(ExtractedInvoice.model_fields),invalid_fields=set(),text=source,pages=[source])
-    assert merged.invoice_number=='FIRST-12'
+    assert merged.invoice_number=='SECOND-14'
     assert 'Tiers disagree: invoice_number' in merged.warnings
 
 

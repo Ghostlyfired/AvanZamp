@@ -1,3 +1,4 @@
+version: invoice-policy-2
 critical_fields: [vendor_name, invoice_number, invoice_date, total]
 
 tolerance:                 # over-billing vs the PO's REMAINING net balance
@@ -16,7 +17,8 @@ duplicates:
 implied_po:                # used only when the invoice prints no PO reference
   min_confidence: 0.80
   min_margin: 0.20         # best score must beat runner-up by this much
-  weights: {amount: 0.5, description: 0.3, recency: 0.2}
+  min_content_similarity: 0.80
+  weights: {amount: 0.2, description: 0.7, recency: 0.1}
 
 extraction:
   reconcile_abs_tolerance: 0.02   # rounding slack when reconciling totals

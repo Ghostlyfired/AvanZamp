@@ -1,6 +1,6 @@
 # InvoiceDesk — Project Plan (PS-1: Invoice processing, PDF → decision)
 
-> **Pilot amendment (2026-11-11):** The original take-home plan below is historical. The authorized backend hardening phase and explicit Section 5/ledger amendments are in [docs/PILOT.md](docs/PILOT.md). Pilot recommendations never post balance; only human approval does. The 12 golden scenarios use an explicit demo profile. The operator UI and operational/real-document acceptance remain release gates.
+> **Current workflow amendment:** [docs/WORKFLOW.md](docs/WORKFLOW.md) supersedes historical extraction and posting rules below. Live accepted uploads always call the provider; deterministic checks can automatically approve and post clean invoices. This original candidate plan is retained as historical context.
 
 > Self-contained build plan for a 24-hour take-home case study. It is written so that it can be handed to AI coding agents, whole or in pieces. Sections 0–5 are shared context; Section 12 splits the build into work packages that can run in parallel.
 

@@ -14,6 +14,13 @@ class ApprovalBlocked(ValueError):
     pass
 
 
+def authorize_automatic(recommendation: Recommendation, policy: Policy) -> Decimal:
+    """Automation cannot exercise any of a human reviewer's exception powers."""
+    if recommendation.decision.outcome != Outcome.AUTO_APPROVE:
+        raise ApprovalBlocked('Automatic approval requires all mandatory checks to pass.')
+    return authorize(recommendation, policy, '', False)
+
+
 def authorize(recommendation: Recommendation, policy: Policy, reason: str,
               confirmed_source: bool) -> Decimal:
     inv = ExtractedInvoice.model_validate_json(recommendation.interpretation.invoice_json)
@@ -45,4 +52,6 @@ def authorize(recommendation: Recommendation, policy: Policy, reason: str,
         raise ApprovalBlocked('A recorded reason is required for a review exception.')
     if (integrity.proposed or any(c.check_id == 'source_grounding' and c.proposed for c in exceptions)) and not confirmed_source:
         raise ApprovalBlocked('Confirm the invoice against its source before approval.')
+    if norm.net_amount >= Decimal('1e18') or norm.net_amount != norm.net_amount.quantize(Decimal('0.000001')):
+        raise ApprovalBlocked('Approval amounts support at most six decimal places and must be below 1e18.')
     return norm.net_amount

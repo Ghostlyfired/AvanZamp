@@ -130,12 +130,17 @@ def parse_response(raw: dict[str, Any]) -> PartialExtraction:
 def blocking_warnings(invoice: ExtractedInvoice) -> list[str]:
     """Payment-critical issues block; optional scheduling metadata stays visible."""
     import re
-    optional = {'due_date'}
+    optional = {'due_date', 'sender', 'recipient', 'document_date', 'document_type', 'prices_include_tax'}
     if invoice.po_reference:
         optional.add('reference_text')  # Explicit PO resolution is checked separately.
     result = []
     for warning in invoice.warnings:
         match = re.match(r'^(?:Tiers disagree: |Model did not confirm parsed field: |Grounding failed: |Partial extraction: )(?:evidence\.)?([a-z_]+)(?:$|[. (])',warning)
-        if not match or match.group(1) not in optional:
-            result.append(warning)
+        if match and match.group(1) in optional:
+            continue
+        # Item bookkeeping does not establish financial consistency. Keep the
+        # description, part identifier and all numerical cells payment-critical.
+        if re.match(r'^Partial extraction: (?:evidence\.)?line_items\.\d+\.(?:supplier_name|unit)(?:$|[. (])', warning):
+            continue
+        result.append(warning)
     return result

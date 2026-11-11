@@ -1,0 +1,252 @@
+{
+  "description": "User-provided final acceptance cases. Folder labels are test expectations only; production code never reads this manifest.",
+  "assumptions": [
+    "Cases run independently: positive files repeat invoice identities and therefore cannot all be approved sequentially.",
+    "The test-only PO baseline assumes one authorized item of each Apple product at the printed price, USD, 12% tax and no delivery allowance. This is evaluation master data, not verified real procurement authorization.",
+    "Apple Technologies, Apple Technologies Ltd. and Apple Technologies Inc are aliases in this synthetic evaluation master only."
+  ],
+  "master": {
+    "vendors": [
+      {
+        "vendor_id": "V-TEST-APPLE",
+        "name": "Apple Technologies Ltd.",
+        "aliases_json": "[\"Apple Technologies Inc\", \"Apple Technologies\"]",
+        "status": "approved",
+        "notes": "Synthetic final acceptance master; not production procurement authorization."
+      }
+    ],
+    "purchase_orders": [
+      {
+        "po_number": "PO-1241",
+        "vendor_id": "V-TEST-APPLE",
+        "description": "Apple Macbook M4 Apple iPhone 12 Apple iPhone Air Apple Airpods 4",
+        "net_amount": "3196.00",
+        "tax_rate": "0.12",
+        "currency": "USD",
+        "status": "open",
+        "issue_date": "2026-11-01",
+        "line_items_json": "[{\"description\": \"Apple Macbook M4\", \"quantity\": \"1\", \"unit_price\": \"1499.00\", \"amount\": \"1499.00\"}, {\"description\": \"Apple iPhone 12\", \"quantity\": \"1\", \"unit_price\": \"599.00\", \"amount\": \"599.00\"}, {\"description\": \"Apple iPhone Air\", \"quantity\": \"1\", \"unit_price\": \"899.00\", \"amount\": \"899.00\"}, {\"description\": \"Apple Airpods 4\", \"quantity\": \"1\", \"unit_price\": \"199.00\", \"amount\": \"199.00\"}]",
+        "charge_allowances_json": "[]"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "file": "negative/Invoice (1).pdf",
+      "sha256": "45ae7f564a532ed993bcd76483f6482a2a9427cfd95203472b475236f24a1076",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice (2).pdf",
+      "sha256": "8cd5ff710a1ca0363b138dda4a7f96fa81e166accd5719c4bcfb963194875d38",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice (3).pdf",
+      "sha256": "928b4d5c071edf2e4d3152ec340a74c5c62344a17546da01414a8db72fbe65cd",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice (4).pdf",
+      "sha256": "6847b0a1f67d07284c69c67d369b18a47c59411b778786b8cfc67139bd221990",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice (5).pdf",
+      "sha256": "72b17c4aca4f7c033883eb334de9ca013507d9aa60b29f01a2ae64a3bc04f8bc",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice (6).pdf",
+      "sha256": "2c4c6503764c0c6b9c744a8f87b32f1690355c4e51d32d44be0fe481802f1e1f",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice (7).pdf",
+      "sha256": "0136d7566b7ea5a2791c6c6a514ed142df8f02366a14c56fc49ecbcc78d005cf",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice (8).pdf",
+      "sha256": "d8fd1eac64b3662c1768e0f710ff9758a7bb641b96c95dfd777988a79b8f84d8",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice (9).pdf",
+      "sha256": "7c4c31495cc9bec5a16cd169b41ea95fe1af1a8ee35bec0f24e0713d0b428b47",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice INV - 9111 (1).pdf",
+      "sha256": "4b3d5f4c50c43d8156d1830c4f06c9acc88e7cf86497c86d4acb19576fd2cbfe",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice INV - 9111 (2).pdf",
+      "sha256": "65a0c590a1f02a2d08a34f9556b5743b73113c4fc4127b35c5aa0b9c241d8b4f",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice INV - 9111.pdf",
+      "sha256": "db6406fb28e4e29aa0146e8ef452e50f2ef15c0be2c167ef1f0dd525d23f66d8",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice INV - 9236.pdf",
+      "sha256": "45440b5bdac47e39c109eca9ca920bb5a93f9848a5f8562bad948da0427a3612",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice INV - 96767.pdf",
+      "sha256": "c9df5fdb9169947c3dc2756514f74caa2e0177f65639f32c57408c6062a68c97",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice INV - 9677.pdf",
+      "sha256": "60b0dafd5e06e8d9193b74dea0cd12d9978181b252750f64144f3f0e489e3b72",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice INV - 9999.pdf",
+      "sha256": "0fb0f01913da9f27575007123131c73146db7675c148a5168dbd1141a0d3d13b",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "negative/Invoice.pdf",
+      "sha256": "c96ff68201a5ab85c7ef3d732bacb9f92d24285d2ac2c70f6307ead82657d1f9",
+      "allowed_outcomes": [
+        "NEEDS_REVIEW",
+        "HOLD_MISSING_INFO",
+        "REJECT"
+      ]
+    },
+    {
+      "file": "positive/Invoice_Apple_00.pdf",
+      "sha256": "84e4ccf222e4748be0f7ef80304acfaf4472d481e7b5db80c5a8fe753fe728eb",
+      "allowed_outcomes": [
+        "AUTO_APPROVE"
+      ],
+      "fields": {
+        "invoice_number": "INV-004",
+        "invoice_date": "2026-11-20",
+        "po_reference": "PO-1241",
+        "currency": "USD",
+        "subtotal": "3196.00",
+        "tax_amount": "383.52",
+        "total": "3579.52"
+      }
+    },
+    {
+      "file": "positive/Invoice_Apple_01.pdf",
+      "sha256": "7d23dfa65bf2e94bdb30003a12605a0e16b25dcbeace629ba323a1ffbb2c17e7",
+      "allowed_outcomes": [
+        "AUTO_APPROVE"
+      ],
+      "fields": {
+        "invoice_number": "INV-004",
+        "invoice_date": "2026-11-20",
+        "po_reference": "PO-1241",
+        "currency": "USD",
+        "subtotal": "3196.00",
+        "tax_amount": "383.52",
+        "total": "3579.52"
+      }
+    },
+    {
+      "file": "positive/Invoice_Apple_02.pdf",
+      "sha256": "186abd089600fc0d4a095468aa7dc7c2f9c435cd163fb38279c12bf454c5915f",
+      "allowed_outcomes": [
+        "AUTO_APPROVE"
+      ],
+      "fields": {
+        "invoice_number": "INV-1365",
+        "invoice_date": "2026-11-19",
+        "po_reference": "PO-1241",
+        "currency": "USD",
+        "subtotal": "3196.00",
+        "tax_amount": "383.52",
+        "total": "3579.52"
+      }
+    },
+    {
+      "file": "positive/Invoice_Apple_03.pdf",
+      "sha256": "d175cee3c203ba8a003d57c235d3923646d492271a0c9b680482c3ba8485a865",
+      "allowed_outcomes": [
+        "AUTO_APPROVE"
+      ],
+      "fields": {
+        "invoice_number": "INV-1365",
+        "invoice_date": "2026-11-19",
+        "po_reference": "PO-1241",
+        "currency": "USD",
+        "subtotal": "3196.00",
+        "tax_amount": "383.52",
+        "total": "3579.52"
+      }
+    }
+  ]
+}

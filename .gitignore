@@ -3,6 +3,9 @@
 # PYTHON — Virtual Environments
 # ============================================================
 .venv/
+.venv312/
+.venv314-tools/
+.venv-python/
 venv/
 env/
 ENV/
@@ -17,7 +20,13 @@ __pycache__/
 *$py.class
 *.pyo
 *.pyd
-.cache/
+.cache/*
+!.cache/llm/
+.cache/llm/*
+# Only these three hash-paired synthetic golden fixtures are distributable.
+!.cache/llm/06746e3a554cdcecbfdc6ac3a17a24d2971a3bb645d33fc0826bbd8524aa150c.json
+!.cache/llm/ba15f4f0017c3d3646cd5ffc586f734e94c83270a6f58e5c68aefda022ebac12.json
+!.cache/llm/b4a27523dea60c0570507ea53ac1d7727637c9bd657a819183dab20336d9a84f.json
 .pytype/
 .pyre/
 .pyright/
@@ -30,6 +39,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!.env.pilot.example
 !.env.template
 !.env.sample
 

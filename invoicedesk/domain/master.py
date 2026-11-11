@@ -23,6 +23,35 @@ class Vendor(BaseModel):
         return value
 
 
+class PurchaseOrderLine(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    description: str = Field(min_length=1)
+    part_number: str | None = None
+    quantity: Decimal | None = Field(default=None, gt=0)
+    unit_price: Decimal | None = Field(default=None, ge=0)
+    amount: Decimal | None = Field(default=None, ge=0)
+
+    @field_validator('quantity', 'unit_price', 'amount', mode='before')
+    @classmethod
+    def decimal_text(cls, value):
+        if isinstance(value, float):
+            raise ValueError('Quantities and money must be decimal strings.')
+        return value
+
+
+class ChargeAllowance(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    description: str = Field(min_length=1)
+    amount: Decimal = Field(ge=0)  # Maximum approved charge per invoice.
+
+    @field_validator('amount', mode='before')
+    @classmethod
+    def decimal_text(cls, value):
+        if isinstance(value, float):
+            raise ValueError('Money must be decimal strings.')
+        return value
+
+
 class PurchaseOrder(BaseModel):
     model_config = ConfigDict(extra='forbid')
     po_number: str = Field(min_length=1, max_length=80)
@@ -33,6 +62,8 @@ class PurchaseOrder(BaseModel):
     currency: str = Field(pattern=r'^[A-Z]{3}$')
     status: Literal['open', 'closed']
     issue_date: date
+    line_items: list[PurchaseOrderLine] = Field(default_factory=list)
+    charge_allowances: list[ChargeAllowance] = Field(default_factory=list)
 
     @field_validator('net_amount', 'tax_rate', mode='before')
     @classmethod

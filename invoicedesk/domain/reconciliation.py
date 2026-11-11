@@ -3,6 +3,8 @@ from invoicedesk.domain.models import ExtractedInvoice
 
 
 def reconcile(inv: ExtractedInvoice, tolerance: Decimal) -> list[dict]:
+    from .adjustments import effective_adjustments
+    charge_rows = effective_adjustments(inv)
     findings: list[dict] = []
 
     def compare(name: str, calculated: Decimal, printed: Decimal, scope: str, *, row_index: int | None = None) -> None:
@@ -16,8 +18,8 @@ def reconcile(inv: ExtractedInvoice, tolerance: Decimal) -> list[dict]:
     items_complete = bool(amounts) and all(amount is not None for amount in amounts)
     if inv.subtotal is not None and items_complete:
         compare('Line items to subtotal', sum(amounts, Decimal(0)), inv.subtotal, 'subtotal')
-    adjustments_complete = all(a.amount is not None for a in inv.adjustments)
-    adjustments = sum((a.amount for a in inv.adjustments if a.amount is not None), Decimal(0))
+    adjustments_complete = all(a.amount is not None for a in charge_rows)
+    adjustments = sum((a.amount for a in charge_rows if a.amount is not None), Decimal(0))
     if inv.subtotal is not None and inv.tax_amount is not None and inv.total is not None and adjustments_complete:
         compare('Subtotal plus tax and printed adjustments to total', inv.subtotal+inv.tax_amount+adjustments, inv.total, 'total')
     elif inv.prices_include_tax and inv.total is not None and inv.tax_amount is not None and items_complete and adjustments_complete:

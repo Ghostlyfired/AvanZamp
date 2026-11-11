@@ -1,4 +1,3 @@
-import json
 import time
 import uuid
 from pathlib import Path
@@ -14,7 +13,6 @@ from invoicedesk.infrastructure.extraction.router import extract
 from invoicedesk.infrastructure.extraction.sections import section_report
 from invoicedesk.domain.normalize import normalize, normalize_po
 from invoicedesk.domain import checks as engine
-from invoicedesk.domain.decide import decide
 from invoicedesk.domain.comms import draft
 
 def _run_invoice(path: Path, *, db: Db, policy: Policy, llm: LlmClient) -> Iterator[StageEvent]:
@@ -35,7 +33,7 @@ def _run_invoice(path: Path, *, db: Db, policy: Policy, llm: LlmClient) -> Itera
     from invoicedesk.infrastructure.extraction.evidence import verify_references
     from invoicedesk.infrastructure.extraction.text import read_document_text
     try:
-        pages = read_document_text(path).pages if document.is_pdf else []
+        pages = read_document_text(path).pages
     except Exception:
         pages = []
     references = verify_references(inv, pages)

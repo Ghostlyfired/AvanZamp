@@ -16,11 +16,10 @@ def verify_stored_source(invoice: ExtractedInvoice, path: Path | None, expected_
         document = inspect_document(path)
         if document.sha256 != expected_sha256:
             raise ValueError('Stored document integrity mismatch. Approval is blocked.')
-        if document.is_pdf:
-            try:
-                pages = read_document_text(path).pages
-            except Exception as exc:
-                reader_error = type(exc).__name__
+        try:
+            pages = read_document_text(path).pages
+        except Exception as exc:
+            reader_error = type(exc).__name__
     reconstructed = False
     if raw_response is not None and any(page.strip() for page in pages):
         from invoicedesk.domain.validation import parse_response

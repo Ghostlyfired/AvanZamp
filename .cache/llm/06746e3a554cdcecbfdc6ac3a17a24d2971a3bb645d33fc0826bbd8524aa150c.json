@@ -1,0 +1,37 @@
+{
+  "provenance": "synthetic_fixture",
+  "source": "scripts/generate_test_data.py; NOT an API recording",
+  "extraction": {
+    "vendor_name": "Cobalt Cloud Hosting Inc",
+    "invoice_number": "CH-88120",
+    "invoice_date": "2026-09-18",
+    "po_reference": "PO-2001",
+    "currency": "USD",
+    "subtotal": "10000.00",
+    "tax_amount": "800.00",
+    "total": "10800.00",
+    "prices_include_tax": false,
+    "reference_text": "Milestone 1 - Platform migration: discovery & design",
+    "line_items": [
+      {
+        "description": "Milestone 1 - Platform migration: discovery & design",
+        "quantity": "1",
+        "unit_price": "10000",
+        "amount": "10000"
+      }
+    ],
+    "evidence": {
+      "vendor_name": "Vendor: Cobalt Cloud Hosting Inc",
+      "invoice_number": "Bill ref: CH-88120",
+      "invoice_date": "Invoice date: 2026-09-18",
+      "po_reference": "PO Number: PO-2001",
+      "currency": "Currency: USD",
+      "subtotal": "Item: Milestone 1 - Platform migration: discovery & design | 1 | 10000.00 | 10000.00",
+      "tax_amount": "Tax: 800.00",
+      "total": "Grand total: 10800.00",
+      "reference_text": "Re: Milestone 1 - Platform migration: discovery & design",
+      "prices_include_tax": "Tax: 800.00",
+      "line_items": "Item: Milestone 1 - Platform migration: discovery & design | 1 | 10000.00 | 10000.00"
+    }
+  }
+}

@@ -19,10 +19,14 @@ def evaluate(invoice: ExtractedInvoice, findings: list[dict], snapshot: Procurem
             checks.append(engine.check('financial_semantics', 'amounts', 'WARN',
                 'Non-positive totals or negative tax require a separate review workflow.', 'NEEDS_REVIEW'))
         grounded = {e.path for e in source_evidence if e.verification in {'VERIFIED', 'GROUNDED'}}
-        missing_evidence = [name for name in policy.critical_fields if getattr(inv, name, None) is not None
+        critical = [*policy.critical_fields, 'currency', 'subtotal', 'tax_amount', 'po_reference']
+        missing_evidence = [name for name in critical if getattr(inv, name, None) is not None
                             and name not in grounded]
         required_cells = [f'line_items.{index}.{name}' for index, row in enumerate(inv.line_items)
-                          for name, value in row.model_dump().items() if value is not None]
+                          for name, value in row.model_dump().items()
+                          if name in {'description', 'part_number', 'quantity', 'unit_price', 'amount'} and value is not None]
+        required_cells.extend(f'adjustments.{index}.{name}' for index, row in enumerate(inv.adjustments)
+                              for name in ('description', 'amount') if getattr(row, name) is not None)
         paths = grounded
         missing_evidence.extend(path for path in required_cells if path not in paths)
         if missing_evidence:

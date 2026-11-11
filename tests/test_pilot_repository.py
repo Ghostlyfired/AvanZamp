@@ -35,7 +35,7 @@ def completed_job(repo, tmp_path, number='ONE', day='2026-01-01'):
     inv = ExtractedInvoice(document_type='invoice', vendor_name='Example Vendor', invoice_number=number,
         invoice_date=day, po_reference='PO-123', currency='USD', subtotal='1000', tax_amount='0', total='1000',
         extraction_path='llm_vision')
-    refs = tuple(EvidenceReference(path=name, snippet=str(getattr(inv,name)), verification='GROUNDED') for name in Policy.load().critical_fields)
+    refs = tuple(EvidenceReference(path=name, snippet=str(getattr(inv,name)), verification='GROUNDED') for name in [*Policy.load().critical_fields,'currency','subtotal','tax_amount','po_reference'])
     with repo.engine.begin() as c:
         repo.lock(c)
         policy = repo.policy(c)

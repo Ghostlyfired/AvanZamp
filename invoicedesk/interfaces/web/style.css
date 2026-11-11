@@ -13,6 +13,13 @@
 * {
   box-sizing:border-box;
 }
+.demo-banner {
+  padding:12px 24px;
+  background:#fff2cf;
+  color:#68430b;
+  border-bottom:1px solid #e7ca83;
+  font-weight:600;
+}
 body {
   margin:0;
   color:var(--ink);
@@ -446,7 +453,7 @@ tbody tr:hover {
 .fact {
   overflow-wrap:anywhere;
 }
-.fact span {
+.fact .fact-label {
   display:block;
   font-size:10px;
   color:var(--muted);
@@ -823,3 +830,8 @@ label.checkbox input {
 .communication { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 18px; }
 .communication h4 { margin: 12px 0; font-size: 12px; }
 .communication-body { white-space: pre-wrap; font-size: 12px; line-height: 1.7; }
+.po-lines-editor { border-top: 1px solid var(--line); padding-top: 18px; }
+.po-lines-editor h3 { margin-top: 18px; }
+.po-editor-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; border: 1px solid var(--line); padding: 12px; border-radius: 6px; margin-bottom: 12px; }
+.po-editor-row > button { justify-self: start; align-self: end; }
+@media(max-width:720px) { .po-editor-row { grid-template-columns: minmax(0, 1fr); } }

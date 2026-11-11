@@ -1,8 +1,12 @@
 # Pilot implementation and operational acceptance
 
-The product boundary remains vendor invoice → procurement checks → explained decision. This is a backend/API implementation for a single company, not a completed production pilot. The backend phase described here preceded the separate [local operator UI](LOCAL_UI.md). The local UI uses an isolated SQLite workspace; PostgreSQL/OIDC deployment acceptance remains separate.
+The product boundary remains vendor invoice → procurement checks → explained decision. The authenticated operator UI now shares the production application services. Local operation uses an isolated SQLite workspace; PostgreSQL/OIDC deployment acceptance remains separate. See [executed verification](VERIFICATION.md) for current results.
 
-## Contract amendment
+## Current contract
+
+The newer [workflow amendment](WORKFLOW.md) takes precedence: clean invoices automatically post under the same locked approval invariants. The authenticated operator UI is now included in the production API. Historical recommendations are not posted retroactively. Alembic head is `0002_identifiers`.
+
+## Historical pilot contract amendment
 
 This explicitly supersedes the prototype ledger behavior in PROJECT_PLAN.md Sections 3, 8.5, and 10. `AUTO_APPROVE` is a recommendation, and consumes **zero balance** in the pilot. Human approval is the only ledger write. The four outcome labels, CheckResult/Decision/StageEvent fields, legacy `run_invoice` signature, and existing CLI JSON keys remain compatible through import/report adapters.
 
@@ -30,7 +34,7 @@ Routine production logs contain metrics/error categories, with no request/sessio
 
 ## Extraction and evaluation
 
-One extraction call per document when deterministic parsing is insufficient. The prompt has a versioned task, trust boundary, extraction rules, ambiguity handling, and output requirements. No examples, voting, RAG, or agent workflow were added without evaluation evidence. Model selection is deployment configuration: the worker requires `LLM_MODEL == INVOICEDESK_EVALUATED_MODEL` in live mode, and rejects moving aliases for OpenAI/Anthropic in favor of dated snapshots. Operators must supply an exact snapshot they actually evaluated; equality is a configuration check, not evidence of an evaluation.
+One fresh extraction call per accepted live document attempt, including parser-friendly and repeated uploads. Live recordings are retained for audit and never skip a provider request. The prompt has a versioned task, trust boundary, extraction rules, ambiguity handling, and output requirements. No examples, voting, RAG, or agent workflow were added without evaluation evidence. Model selection is deployment configuration: the worker requires `LLM_MODEL == INVOICEDESK_EVALUATED_MODEL` in live mode, and rejects moving aliases for OpenAI/Anthropic in favor of dated snapshots. Operators must supply an exact snapshot they actually evaluated; equality is a configuration check, not evidence of an evaluation.
 
 The canonical Pydantic schema has provider adapters. Schema compatibility and nullable evidence have offline regression coverage. Explicit extraction results preserve raw facts, issues, evidence, usage, timing, and provenance. Cache keys include document SHA, preprocessing, provider, configured resolved model, prompt contents, schema, and inference settings. Uncertainty survives cache replay. A model-written scan snippet is always unverified; matching arithmetic does not authenticate it. Field/cell evidence supports page references when available.
 
@@ -115,4 +119,4 @@ Outstanding gates, without implied acceptance:
 - Human-labeled held-out real-document results with no incorrect AUTO_APPROVE recommendations; no synthetic/API provenance substitution.
 - Later operator UI and end-to-end operator acceptance.
 
-The implementation environment has no installable FastAPI/SQLAlchemy/Authlib/psycopg stack, no running PostgreSQL/Docker service, and blocked package-index DNS. These constraints prevent claiming integration, deployment, or real-model acceptance. They do not waive any release gate.
+Current verification installed the Python 3.12 dependency stack and executed offline, browser, SQLite migration and live model evaluations. No running PostgreSQL/Docker service or live deployment identity provider was available. See [executed verification](VERIFICATION.md) for results and remaining gates.

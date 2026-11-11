@@ -26,6 +26,9 @@ class ExactMoney(sa.TypeDecorator):
         return Decimal(value) if value is not None else None
 
 metadata = sa.MetaData()
+sequences = sa.Table('identifier_sequences', metadata,
+    sa.Column('key', sa.String(40), primary_key=True),
+    sa.Column('value', sa.Integer, nullable=False))
 company = sa.Table('company', metadata,
     sa.Column('id', sa.Integer, primary_key=True), sa.Column('revision', sa.Integer, nullable=False),
     sa.Column('policy', sa.JSON, nullable=False))

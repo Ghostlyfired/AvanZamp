@@ -72,7 +72,7 @@ class JobService:
         from invoicedesk.infrastructure.extraction.evidence import verify_references
         from invoicedesk.infrastructure.extraction.text import read_document_text
         try:
-            pages = read_document_text(path).pages if document.is_pdf else []
+            pages = read_document_text(path).pages
         except Exception:
             pages = []
         references = verify_references(inv, pages)
@@ -87,6 +87,10 @@ class JobService:
             self.repo.check_lease(current_job, token)
             revision = current_job['revision']+1
             current_policy = self.repo.policy(c)
+            from invoicedesk.domain.reconciliation import reconcile
+            findings = reconcile(inv, current_policy.extraction.reconcile_abs_tolerance)
+            from invoicedesk.infrastructure.extraction.sections import section_report
+            sections = section_report(inv, result.validation_issues, findings=findings, source_evidence=references)
             rec = evaluate(inv, findings, self.repo.snapshot(c, exclude=job_id), current_policy, revision, source_evidence=references)
             report = report_from(rec, inv, findings, sections)
             report['source_evidence'] = [ref.model_dump(mode='json') for ref in references]
@@ -94,6 +98,15 @@ class JobService:
                 processing_ms=int((time.monotonic()-started)*1000), api_calls=result.calls, model=result.model, provider=result.provider,
                 usage=result.usage, api_response_ms=result.response_ms, cache_hit=result.cache_hit,
                 provenance=result.provenance or 'deterministic_parser', failure_kind=result.failure_kind, attempt=job['attempt'])
+            review_state = 'pending'
+            if rec.decision.outcome.value == 'AUTO_APPROVE':
+                from invoicedesk.domain.approval import authorize_automatic
+                amount = authorize_automatic(rec, current_policy)
+                approval_job = dict(current_job, revision=revision)
+                self.repo.post_ledger(c, approval_job, report, amount, 'system', 'All mandatory procurement checks passed.')
+                self.repo.artifact(c, job_id, revision, 'approval_recheck', report)
+                self.repo.audit(c, 'system', 'auto_approved', job_id, {'revision': revision, 'context': report['context']})
+                review_state = 'approved'
             self.repo.artifact(c, job_id, revision, 'facts', facts.model_copy(update={'revision': revision}).model_dump(mode='json'))
             self.repo.artifact(c, job_id, revision, 'sections', {'sections': [SectionValidation(
                 section=section['section'], status=section['status'], arithmetic_status=section['arithmetic_status'],
@@ -104,9 +117,9 @@ class JobService:
             from invoicedesk.infrastructure import schema as s
             import sqlalchemy as sa
             seq = (c.execute(sa.select(sa.func.max(s.events.c.seq)).where(s.events.c.job_id == job_id)).scalar() or 0)+1
-            final = StageEvent(run_id=job_id, seq=seq, stage='complete', state='completed', title='Recommendation saved; human approval required',
+            final = StageEvent(run_id=job_id, seq=seq, stage='complete', state='completed', title='Invoice approved and posted' if review_state=='approved' else 'Review report saved',
                                payload={'decision': report['decision'], 'revision': revision}, elapsed_ms=int((time.monotonic()-started)*1000))
             c.execute(s.events.insert().values(job_id=job_id, seq=seq, data=final.model_dump(mode='json')))
             self.repo.update_job(c, job_id, state='completed', revision=revision, error=result.failure_kind or ('partial_extraction' if result.validation_issues else None),
-                                 lease_token=None, lease_until=None, review_state='pending')
+                                 lease_token=None, lease_until=None, review_state=review_state)
             self.repo.audit(c, 'worker', 'recommended', job_id, {'revision': revision, 'context': report['context']})

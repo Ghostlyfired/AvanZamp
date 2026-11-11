@@ -44,7 +44,7 @@ def recommendation(db, inv=None, refs=()):
 
 def grounded(inv):
     return tuple(EvidenceReference(path=name, snippet=str(getattr(inv, name)), verification='GROUNDED')
-                 for name in Policy.load().critical_fields)
+                 for name in [*Policy.load().critical_fields,'currency','subtotal','tax_amount','po_reference'])
 
 
 def test_recommendation_is_not_a_commitment(pilot):

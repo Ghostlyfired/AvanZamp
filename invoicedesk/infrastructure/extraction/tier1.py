@@ -40,8 +40,11 @@ COLUMN_HEADINGS = {
 
 
 def is_column_heading(value: str) -> bool:
-    cells = re.split(r'\t+| {2,}', value.strip())
-    return bool(cells) and all(re.sub(r'[^a-z0-9]', '', cell.casefold()) in COLUMN_HEADINGS for cell in cells)
+    # PDF text readers may collapse table column spacing to single spaces.
+    # Recognize a sequence of known headings without accepting arbitrary values.
+    normalized = re.sub(r'[^a-z0-9]', '', value.casefold())
+    headings = '|'.join(sorted(COLUMN_HEADINGS, key=len, reverse=True))
+    return bool(normalized) and bool(re.fullmatch('(?:'+headings+')+', normalized))
 
 
 def parse(text: str) -> ExtractedInvoice:
